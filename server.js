@@ -38,6 +38,7 @@ function createRoom(code) {
     pendingReset: null,
     chat: [],
     casinoLog: [],
+    lastSlot: null,
     baccarat: { betsOpen: true, bets: {}, lastRound: null }
   };
 }
@@ -76,6 +77,7 @@ function publicState(room) {
     },
     chat: room.chat.slice(-80),
     casinoLog: room.casinoLog.slice(-30),
+    lastSlot: room.lastSlot,
     baccarat: room.baccarat
   };
 }
@@ -194,6 +196,11 @@ function handleSlot(client, payload) {
   const bet = Math.max(1, Math.min(100, Number(payload.bet || 10)));
   const result = casino.resolveSlotSpin({ chips: client.chips, bet });
   client.chips = result.chips;
+  room.lastSlot = {
+    playerId: client.id,
+    playerName: client.name,
+    ...result
+  };
   addCasinoLog(client.room, `${client.name} 拉动老虎机：${result.symbols.join(' ')}，下注 ${result.bet}，获得 ${result.payout} 虚拟筹码`);
   broadcast(client.room);
 }

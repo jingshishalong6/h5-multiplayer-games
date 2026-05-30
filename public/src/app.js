@@ -17,7 +17,9 @@ let model = {
   selected: null,
   legalMoves: [],
   error: '',
-  dragFrom: null
+  dragFrom: null,
+  slotSpinning: false,
+  slotStartedAt: 0
 };
 
 function send(payload) {
@@ -254,14 +256,7 @@ function renderCasino() {
   const round = model.state.baccarat.lastRound;
   return `
     <section class="grid gap-4">
-      <div class="paper-panel rounded-lg p-4">
-        <h2 class="mb-3 text-lg font-black">虚拟老虎机</h2>
-        <div class="mb-3 rounded-md bg-white/70 p-4 text-center text-4xl font-black tracking-normal">福 禄 寿</div>
-        <div class="flex gap-2">
-          <input id="slotBet" type="number" min="1" max="100" value="10" class="w-28 rounded-md border border-stone-300 px-3 py-2" />
-          <button id="slotSpin" class="rounded-md bg-stone-900 px-4 py-2 font-bold text-white">拉一下</button>
-        </div>
-      </div>
+      ${renderSlotMachine()}
       <div class="paper-panel rounded-lg p-4">
         <h2 class="mb-3 text-lg font-black">虚拟百家乐</h2>
         <div class="mb-3 grid grid-cols-3 gap-2">
@@ -277,6 +272,48 @@ function renderCasino() {
   `;
 }
 
+function renderSlotMachine() {
+  const last = model.state.lastSlot;
+  const symbols = model.slotSpinning ? ['财', '龙', '福'] : last?.symbols || ['福', '禄', '寿'];
+  const isWin = last && last.payout > 0 && !model.slotSpinning;
+  return `
+    <div class="slot-cabinet ${model.slotSpinning ? 'is-spinning' : ''} ${isWin ? 'is-win' : ''}">
+      <div class="slot-bulbs">${Array.from({ length: 26 }, (_, index) => `<i style="--i:${index}"></i>`).join('')}</div>
+      <div class="slot-top">
+        <span class="slot-kicker">VIRTUAL CHIPS ONLY</span>
+        <h2>金龙好运机</h2>
+        <p>红金娱乐版 · 只使用虚拟筹码</p>
+      </div>
+      <div class="slot-screen">
+        <div class="slot-reels">
+          ${symbols.map((symbol, index) => `
+            <div class="slot-reel reel-${index + 1}">
+              <div class="slot-strip">
+                ${['福', '禄', '寿', '喜', '财', '龙', symbol].map((item) => `<span>${item}</span>`).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="slot-payline"></div>
+        ${isWin ? '<div class="slot-win-burst">WIN</div>' : ''}
+      </div>
+      <div class="slot-controls">
+        <label>下注
+          <input id="slotBet" type="number" min="1" max="100" value="10" />
+        </label>
+        <button id="slotSpin" ${model.slotSpinning ? 'disabled' : ''}>${model.slotSpinning ? '滚动中' : '启动'}</button>
+      </div>
+      <div class="slot-result">
+        ${last ? `
+          <b>${escapeHtml(last.playerName)}</b> 摇出 ${last.symbols.join(' ')}
+          <span>下注 ${last.bet} · 获得 ${last.payout} · 剩余 ${last.chips}</span>
+        ` : '等待第一局，祝你手气漂亮。'}
+      </div>
+      <div class="coin-rain">${isWin ? Array.from({ length: 18 }, (_, index) => `<i style="--d:${index % 6};--x:${(index * 17) % 100}%"></i>`).join('') : ''}</div>
+    </div>
+  `;
+}
+
 function renderBaccaratRound(round) {
   return `
     <div class="grid gap-2 rounded-md bg-white/70 p-3 text-sm">
@@ -288,7 +325,18 @@ function renderBaccaratRound(round) {
 }
 
 function bindCasino() {
-  $('#slotSpin').addEventListener('click', () => send({ type: 'slotSpin', bet: Number($('#slotBet').value) }));
+  $('#slotSpin').addEventListener('click', () => {
+    if (model.slotSpinning) return;
+    model.slotSpinning = true;
+    model.slotStartedAt = Date.now();
+    const bet = Number($('#slotBet').value);
+    render();
+    setTimeout(() => send({ type: 'slotSpin', bet }), 850);
+    setTimeout(() => {
+      model.slotSpinning = false;
+      render();
+    }, 1800);
+  });
   document.querySelectorAll('[data-baccarat]').forEach((button) => {
     button.addEventListener('click', () => send({ type: 'baccaratBet', side: button.dataset.baccarat, amount: Number($('#baccaratAmount').value) }));
   });
