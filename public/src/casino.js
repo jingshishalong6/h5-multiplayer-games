@@ -93,19 +93,100 @@
     };
   }
 
-  function resolveSlotSpin({ chips, bet, symbols }) {
+  const FIVE_REEL_PAYOUTS = { 0: 0, 1: 0, 2: 3.5, 3: 10, 4: 50, 5: 400 };
+  const FIVE_REEL_BLESSING_TABLES = {
+    10: [
+      { max: 0.38, count: 0 },
+      { max: 0.74, count: 1 },
+      { max: 0.90, count: 2 },
+      { max: 0.97, count: 3 },
+      { max: 0.995, count: 4 },
+      { max: 1, count: 5 }
+    ],
+    20: [
+      { max: 0.34, count: 0 },
+      { max: 0.68, count: 1 },
+      { max: 0.88, count: 2 },
+      { max: 0.96, count: 3 },
+      { max: 0.99, count: 4 },
+      { max: 1, count: 5 }
+    ],
+    50: [
+      { max: 0.30, count: 0 },
+      { max: 0.60, count: 1 },
+      { max: 0.83, count: 2 },
+      { max: 0.94, count: 3 },
+      { max: 0.985, count: 4 },
+      { max: 1, count: 5 }
+    ]
+  };
+
+  function slotBetTier(bet) {
+    if (Number(bet) >= 50) return 50;
+    if (Number(bet) >= 20) return 20;
+    return 10;
+  }
+
+  function blessingBand(value, bet) {
+    const table = FIVE_REEL_BLESSING_TABLES[slotBetTier(bet)];
+    return table.find((band) => value < band.max) || table[table.length - 1];
+  }
+
+  function makeBlessingSymbols(count, random = Math.random) {
+    const fillers = SLOT_SYMBOLS.filter((symbol) => symbol !== '福');
+    const result = Array.from({ length: 5 }, (_, index) => (index < count ? '福' : fillers[Math.floor(random() * fillers.length)]));
+    for (let i = result.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+
+  function resolveSlotSpin({ chips, bet, symbols, reelCount = 3, freeSpin = false, random = Math.random }) {
     const safeBet = Math.max(1, Math.min(Number(bet || 1), chips));
-    const result = symbols || Array.from({ length: 3 }, () => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)]);
+    const count = Math.max(3, Math.min(5, Number(reelCount || 3)));
+    if (count === 5) {
+      const band = symbols ? null : blessingBand(random(), safeBet);
+      const result = (symbols || makeBlessingSymbols(band.count, random)).slice(0, count);
+      const blessingCount = result.filter((symbol) => symbol === '福').length;
+      const payout = FIVE_REEL_PAYOUTS[blessingCount] || 0;
+      return {
+        symbols: result,
+        reelCount: count,
+        bet: safeBet,
+        blessingCount,
+        matchCount: blessingCount,
+        multiplier: safeBet ? payout / safeBet : 0,
+        payout,
+        freeSpin: Boolean(freeSpin),
+        bonusTriggered: blessingCount === 5,
+        chips: Math.max(0, chips - (freeSpin ? 0 : safeBet) + payout)
+      };
+    }
+
+    const result = (symbols || Array.from({ length: count }, () => SLOT_SYMBOLS[Math.floor(random() * SLOT_SYMBOLS.length)])).slice(0, count);
+    const frequencies = result.reduce((map, symbol) => {
+      map[symbol] = (map[symbol] || 0) + 1;
+      return map;
+    }, {});
+    const matchCount = Math.max(...Object.values(frequencies));
+    const fiveBlessings = count === 5 && frequencies['福'] === 5;
     let multiplier = 0;
-    if (result[0] === result[1] && result[1] === result[2]) multiplier = result[0] === '龙' ? 20 : 10;
-    else if (result[0] === result[1] || result[1] === result[2] || result[0] === result[2]) multiplier = 2;
+    if (matchCount === 3) multiplier = count === 5 ? 8 : result[0] === result[1] && result[1] === result[2] ? 10 : 2;
+    if (matchCount === 4) multiplier = 20;
+    if (matchCount === 5) multiplier = fiveBlessings ? 50 : 35;
+    if (count === 3 && result[0] === result[1] && result[1] === result[2] && result[0] === '龙') multiplier = 20;
     const payout = safeBet * multiplier;
     return {
       symbols: result,
+      reelCount: count,
       bet: safeBet,
+      matchCount,
       multiplier,
       payout,
-      chips: Math.max(0, chips - safeBet + payout)
+      freeSpin: Boolean(freeSpin),
+      bonusTriggered: fiveBlessings,
+      chips: Math.max(0, chips - (freeSpin ? 0 : safeBet) + payout)
     };
   }
 

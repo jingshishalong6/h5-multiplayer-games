@@ -13,6 +13,11 @@
     cannon: '炮',
     soldier: '兵'
   };
+  const COLOR_NAMES = { red: '红方', black: '黑方' };
+  const PIECE_NAMES = {
+    red: { king: '帅', advisor: '仕', elephant: '相', horse: '马', rook: '车', cannon: '炮', soldier: '兵' },
+    black: { king: '将', advisor: '士', elephant: '象', horse: '马', rook: '车', cannon: '炮', soldier: '卒' }
+  };
 
   let nextId = 1;
 
@@ -254,6 +259,16 @@
     return result;
   }
 
+  function movePrompt(state) {
+    const mover = other(state.turn);
+    const lastMove = state.moveHistory[state.moveHistory.length - 1];
+    const captured = lastMove && lastMove.captured;
+    const action = captured ? `吃掉${COLOR_NAMES[captured.color]}${PIECE_NAMES[captured.color][captured.type]}` : '走完';
+    if (state.winner) return `${COLOR_NAMES[state.winner]}胜，将死`;
+    if (state.status === 'check') return `${COLOR_NAMES[mover]}${action}，${COLOR_NAMES[state.turn]}被将军`;
+    return `${COLOR_NAMES[mover]}${action}，轮到${COLOR_NAMES[state.turn]}`;
+  }
+
   function undoLastMove(state) {
     if (!state.moveHistory || state.moveHistory.length === 0) return state;
     const next = cloneState(state);
@@ -280,6 +295,7 @@
     isInCheck,
     isCheckmate,
     remainingPieces,
+    movePrompt,
     undoLastMove
   };
 });

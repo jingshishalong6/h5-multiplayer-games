@@ -47,3 +47,24 @@ test('checkmate is detected when the checked king has no escape', () => {
   assert.equal(chess.isInCheck(state, 'black'), true);
   assert.equal(chess.isCheckmate(state, 'black'), true);
 });
+
+test('move prompt announces the side that moved and whose turn is next', () => {
+  const state = chess.createInitialState();
+  const result = chess.movePiece(state, { x: 0, y: 6 }, { x: 0, y: 5 });
+
+  assert.equal(result.ok, true);
+  assert.equal(chess.movePrompt(result.state), '红方走完，轮到黑方');
+});
+
+test('move prompt announces captured piece and whose turn is next', () => {
+  const state = chess.createEmptyState('black');
+  state.board[0][4] = chess.makePiece('black', 'king');
+  state.board[9][3] = chess.makePiece('red', 'king');
+  state.board[1][0] = chess.makePiece('black', 'rook');
+  state.board[5][0] = chess.makePiece('red', 'horse');
+
+  const result = chess.movePiece(state, { x: 0, y: 1 }, { x: 0, y: 5 });
+
+  assert.equal(result.ok, true);
+  assert.equal(chess.movePrompt(result.state), '黑方吃掉红方马，轮到红方');
+});

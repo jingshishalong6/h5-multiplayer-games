@@ -34,6 +34,7 @@ function createRoom(code) {
     code,
     clients: new Map(),
     chess: chess.createInitialState(),
+    chessNotice: null,
     pendingUndo: null,
     pendingReset: null,
     chat: [],
@@ -61,7 +62,9 @@ function publicClient(client) {
     id: client.id,
     name: client.name,
     role: client.role,
-    chips: client.chips
+    chips: client.chips,
+    bonusSpins: client.bonusSpins || 0,
+    bonusTotal: client.bonusTotal || 0
   };
 }
 
@@ -72,6 +75,7 @@ function publicState(room) {
     chess: {
       state: room.chess,
       remaining: chess.remainingPieces(room.chess),
+      notice: room.chessNotice,
       pendingUndo: room.pendingUndo,
       pendingReset: room.pendingReset
     },
@@ -92,6 +96,16 @@ function systemMessage(room, text) {
   broadcast(room);
 }
 
+function chessErrorMessage(reason) {
+  return {
+    'not your turn': '还没轮到你落子',
+    'illegal move': '这个位置不能走',
+    'illegal self check': '不能这样走，会让自己的将帅被将军',
+    'out of bounds': '落点不在棋盘内',
+    'game over': '棋局已经结束'
+  }[reason] || reason || '不能这样走';
+}
+
 function addCasinoLog(room, text) {
   room.casinoLog.push({ id: Date.now() + Math.random(), text, time: new Date().toLocaleTimeString('zh-CN', { hour12: false }) });
 }
@@ -105,6 +119,8 @@ function handleJoin(ws, payload) {
     name: normalizeName(payload.name),
     role: 'spectator',
     chips: 1000,
+    bonusSpins: 0,
+    bonusTotal: 0,
     joinedAt: Date.now() + Math.random()
   };
   ws.clientInfo = client;
@@ -130,10 +146,11 @@ function handleMove(client, payload) {
   }
   const result = chess.movePiece(room.chess, payload.from, payload.to);
   if (!result.ok) {
-    send(client.ws, { type: 'error', message: result.reason || '不能这样走' });
+    send(client.ws, { type: 'error', message: chessErrorMessage(result.reason) });
     return;
   }
   room.chess = result.state;
+  room.chessNotice = chess.movePrompt(room.chess);
   room.pendingUndo = null;
   room.pendingReset = null;
   broadcast(room);
@@ -164,6 +181,7 @@ function handleUndoResponse(client, payload) {
   if (!room.pendingUndo || room.pendingUndo.from === client.role) return;
   if (payload.accept) {
     room.chess = chess.undoLastMove(room.chess);
+    room.chessNotice = null;
     systemMessage(room, `${client.name} 同意悔棋`);
   } else {
     systemMessage(room, `${client.name} 拒绝悔棋`);
@@ -184,6 +202,7 @@ function handleResetResponse(client, payload) {
   if (!room.pendingReset || room.pendingReset.from === client.role) return;
   if (payload.accept) {
     room.chess = chess.createInitialState();
+    room.chessNotice = null;
     systemMessage(room, `${client.name} 同意重置棋局`);
   } else {
     systemMessage(room, `${client.name} 拒绝重置棋局`);
@@ -193,16 +212,31 @@ function handleResetResponse(client, payload) {
 }
 
 function handleSlot(client, payload) {
+  const room = client.room;
   const bet = Math.max(1, Math.min(100, Number(payload.bet || 10)));
-  const result = casino.resolveSlotSpin({ chips: client.chips, bet });
+  const freeSpin = client.bonusSpins > 0;
+  const result = casino.resolveSlotSpin({ chips: client.chips, bet, reelCount: 5, freeSpin });
   client.chips = result.chips;
+  if (freeSpin) {
+    client.bonusSpins -= 1;
+    client.bonusTotal += result.payout;
+  }
+  if (result.bonusTriggered && !freeSpin) {
+    client.bonusSpins = 3;
+    client.bonusTotal = 0;
+  }
   room.lastSlot = {
     playerId: client.id,
     playerName: client.name,
+    bonusSpins: client.bonusSpins,
+    bonusTotal: client.bonusTotal,
     ...result
   };
-  addCasinoLog(client.room, `${client.name} 拉动老虎机：${result.symbols.join(' ')}，下注 ${result.bet}，获得 ${result.payout} 虚拟筹码`);
-  broadcast(client.room);
+  const modeText = freeSpin ? '奖励免费转' : '拉动老虎机';
+  const bonusText = result.bonusTriggered ? '，触发五福奖励模式' : '';
+  const blessingText = typeof result.blessingCount === 'number' ? `，${result.blessingCount} 个福` : '';
+  addCasinoLog(room, `${client.name} ${modeText}：${result.symbols.join(' ')}${blessingText}，${freeSpin ? '免费转' : `下注 ${result.bet} 分`}，获得 ${result.payout} 虚拟分${bonusText}`);
+  broadcast(room);
 }
 
 function handleBaccaratBet(client, payload) {

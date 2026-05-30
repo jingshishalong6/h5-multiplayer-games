@@ -17,9 +17,14 @@ let model = {
   selected: null,
   legalMoves: [],
   error: '',
+  chessHint: '',
   dragFrom: null,
   slotSpinning: false,
-  slotStartedAt: 0
+  slotStartedAt: 0,
+  celebrationSlotKey: '',
+  skippedCelebrationKey: '',
+  slotBet: 10,
+  baccaratAmount: 20
 };
 
 function send(payload) {
@@ -41,10 +46,14 @@ function connect(name, roomCode) {
       model.you = message.you;
       model.state = message.state;
       model.error = '';
+      model.chessHint = '';
       model.selected = null;
       model.legalMoves = [];
     }
-    if (message.type === 'error') model.error = message.message;
+    if (message.type === 'error') {
+      model.error = message.message;
+      model.chessHint = ChessHints.errorHint(message.message);
+    }
     render();
   });
   ws.addEventListener('close', () => {
@@ -109,11 +118,13 @@ function render() {
       <div>${model.tab === 'chess' ? renderChess() : model.tab === 'casino' ? renderCasino() : renderChat()}</div>
       <aside class="paper-panel rounded-lg p-4">${renderSidePanel()}</aside>
     </section>
+    ${renderWinCelebration()}
   `);
   bindCommon();
   if (model.tab === 'chess') bindChess();
   if (model.tab === 'casino') bindCasino();
   if (model.tab === 'chat') bindChat();
+  bindCelebration();
 }
 
 function tabButton(tab, label) {
@@ -136,6 +147,8 @@ function roleLabel(role) {
 function renderChess() {
   const game = model.state.chess.state;
   const status = game.winner ? `${roleLabel(game.winner)}胜，将死` : game.status === 'check' ? `${roleLabel(game.turn)}被将军` : `轮到${roleLabel(game.turn)}`;
+  const notice = model.state.chess.notice || '';
+  const hint = model.chessHint || ChessHints.turnHint(game, model.you.role);
   return `
     <section class="paper-panel rounded-lg p-3 sm:p-4">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -148,8 +161,10 @@ function renderChess() {
           <button data-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重置</button>
         </div>
       </div>
+      ${notice ? `<div class="chess-notice mb-3" role="status">${escapeHtml(notice)}</div>` : ''}
       ${renderPending()}
       <div class="flex justify-center">${renderBoard(game)}</div>
+      <div class="chess-hint mt-3" role="status">${escapeHtml(hint)}</div>
     </section>
   `;
 }
@@ -171,16 +186,21 @@ function renderPending() {
 }
 
 function renderBoard(game) {
+  const viewRole = model.you.role === 'black' ? 'black' : 'red';
   const lines = [];
   for (let i = 0; i < 10; i += 1) lines.push(`<span class="board-line-h" style="top:${(i / 9) * 100}%"></span>`);
   for (let i = 0; i < 9; i += 1) lines.push(`<span class="board-line-v" style="left:${(i / 8) * 100}%"></span>`);
   const pieces = [];
   game.board.forEach((row, y) => row.forEach((piece, x) => {
     if (!piece) return;
+    const view = BoardView.toView({ x, y }, viewRole);
     const selected = model.selected && model.selected.x === x && model.selected.y === y;
-    pieces.push(`<button class="piece ${piece.color} ${selected ? 'selected' : ''}" draggable="true" data-x="${x}" data-y="${y}" style="left:${posX(x)}%;top:${posY(y)}%">${pieceNames[piece.color][piece.type]}</button>`);
+    pieces.push(`<button class="piece ${piece.color} ${selected ? 'selected' : ''}" draggable="true" data-x="${x}" data-y="${y}" style="left:${posX(view.x)}%;top:${posY(view.y)}%">${pieceNames[piece.color][piece.type]}</button>`);
   }));
-  const dots = model.legalMoves.map((pos) => `<button class="dot" data-to-x="${pos.x}" data-to-y="${pos.y}" style="left:${posX(pos.x)}%;top:${posY(pos.y)}%"></button>`);
+  const dots = model.legalMoves.map((pos) => {
+    const view = BoardView.toView(pos, viewRole);
+    return `<button class="dot" data-to-x="${pos.x}" data-to-y="${pos.y}" style="left:${posX(view.x)}%;top:${posY(view.y)}%"></button>`;
+  });
   return `
     <div id="board" class="board-wrap">
       <div class="board-lines">${lines.join('')}</div>
@@ -215,7 +235,8 @@ function bindChess() {
   board.addEventListener('drop', (event) => {
     event.preventDefault();
     const rect = board.getBoundingClientRect();
-    const to = boardPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
+    const viewRole = model.you.role === 'black' ? 'black' : 'red';
+    const to = BoardView.fromView(boardPoint(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height), viewRole);
     if (model.dragFrom) {
       send({ type: 'chessMove', from: model.dragFrom, to });
       model.dragFrom = null;
@@ -235,9 +256,24 @@ function selectPiece(x, y) {
     sendMove({ x, y });
     return;
   }
-  if (!piece || piece.color !== model.you.role || piece.color !== game.turn) return;
+  if (!piece) {
+    model.chessHint = '请点击自己的棋子开始走棋';
+    render();
+    return;
+  }
+  if (piece.color !== model.you.role) {
+    model.chessHint = `这是${roleLabel(piece.color)}棋子，请选择自己的棋子`;
+    render();
+    return;
+  }
+  if (piece.color !== game.turn) {
+    model.chessHint = ChessHints.turnHint(game, model.you.role);
+    render();
+    return;
+  }
   model.selected = { x, y };
   model.legalMoves = ChessCore.getLegalMoves(game, model.selected);
+  model.chessHint = ChessHints.selectionHint(model.legalMoves.length);
   render();
 }
 
@@ -257,13 +293,14 @@ function renderCasino() {
   return `
     <section class="grid gap-4">
       ${renderSlotMachine()}
+      ${renderCasinoLogPanel()}
       <div class="paper-panel rounded-lg p-4">
         <h2 class="mb-3 text-lg font-black">虚拟百家乐</h2>
         <div class="mb-3 grid grid-cols-3 gap-2">
           ${['player', 'banker', 'tie'].map((side) => `<button data-baccarat="${side}" class="rounded-md border border-stone-300 bg-white px-3 py-3 font-bold">${sideNames[side]}</button>`).join('')}
         </div>
         <div class="mb-3 flex gap-2">
-          <input id="baccaratAmount" type="number" min="1" max="200" value="20" class="w-28 rounded-md border border-stone-300 px-3 py-2" />
+          <input id="baccaratAmount" type="number" min="1" max="200" value="${model.baccaratAmount}" class="w-28 rounded-md border border-stone-300 px-3 py-2" />
           <button id="baccaratDeal" class="rounded-md bg-red-800 px-4 py-2 font-bold text-white">开牌</button>
         </div>
         ${round ? renderBaccaratRound(round) : '<p class="text-sm text-stone-600">下注后点击开牌，全部为虚拟筹码娱乐。</p>'}
@@ -272,46 +309,96 @@ function renderCasino() {
   `;
 }
 
+function renderCasinoLogPanel() {
+  const logs = model.state.casinoLog.slice().reverse();
+  return `
+    <div class="paper-panel rounded-lg p-4">
+      <h2 class="mb-3 text-lg font-black">娱乐记录</h2>
+      <div class="log-scroll max-h-44 overflow-auto text-sm">${logs.map((item) => `<p class="mb-2 rounded-md bg-white/70 p-2">${escapeHtml(item.text)}</p>`).join('') || '<p class="text-stone-500">暂无记录。</p>'}</div>
+    </div>
+  `;
+}
+
 function renderSlotMachine() {
   const last = model.state.lastSlot;
-  const symbols = model.slotSpinning ? ['财', '龙', '福'] : last?.symbols || ['福', '禄', '寿'];
+  const symbols = model.slotSpinning ? ['财', '龙', '福', '喜', '禄'] : last?.symbols || ['福', '禄', '寿', '喜', '财'];
   const isWin = last && last.payout > 0 && !model.slotSpinning;
+  const isFiveBlessings = last?.bonusTriggered && !model.slotSpinning;
+  const inBonus = (model.you?.bonusSpins || 0) > 0;
   return `
-    <div class="slot-cabinet ${model.slotSpinning ? 'is-spinning' : ''} ${isWin ? 'is-win' : ''}">
-      <div class="slot-bulbs">${Array.from({ length: 26 }, (_, index) => `<i style="--i:${index}"></i>`).join('')}</div>
+    <div class="slot-cabinet ${model.slotSpinning ? 'is-spinning' : ''} ${isWin ? 'is-win' : ''} ${isFiveBlessings ? 'is-five-blessing' : ''} ${inBonus ? 'bonus-live' : ''}">
+      <div class="slot-bulbs">${Array.from({ length: 34 }, (_, index) => `<i style="--i:${index}"></i>`).join('')}</div>
       <div class="slot-top">
         <span class="slot-kicker">VIRTUAL CHIPS ONLY</span>
-        <h2>金龙好运机</h2>
-        <p>红金娱乐版 · 只使用虚拟筹码</p>
+        <h2>五福金龙机</h2>
+        <p>${inBonus ? `福气奖励模式 · 剩余 ${model.you.bonusSpins} 次免费转` : '下注 10 分为一注 · 凑齐五福进奖励模式'}</p>
+        <div class="slot-jackpot">福气池 <b>88,888</b></div>
       </div>
       <div class="slot-screen">
-        <div class="slot-reels">
+        <div class="slot-reels slot-reels-five">
           ${symbols.map((symbol, index) => `
             <div class="slot-reel reel-${index + 1}">
               <div class="slot-strip">
                 ${['福', '禄', '寿', '喜', '财', '龙', symbol].map((item) => `<span>${item}</span>`).join('')}
               </div>
+              ${symbol === '福' && !model.slotSpinning ? '<em class="blessing-glow"></em>' : ''}
             </div>
           `).join('')}
         </div>
         <div class="slot-payline"></div>
-        ${isWin ? '<div class="slot-win-burst">WIN</div>' : ''}
+        ${isFiveBlessings ? '<div class="slot-win-burst five">五福临门</div>' : isWin ? '<div class="slot-win-burst">WIN</div>' : ''}
       </div>
       <div class="slot-controls">
-        <label>下注
-          <input id="slotBet" type="number" min="1" max="100" value="10" />
-        </label>
-        <button id="slotSpin" ${model.slotSpinning ? 'disabled' : ''}>${model.slotSpinning ? '滚动中' : '启动'}</button>
+        <div class="slot-bet-picks" role="group" aria-label="下注档位">
+          ${[10, 20, 50].map((value) => `<button type="button" class="slot-bet-pick ${model.slotBet === value ? 'active' : ''}" data-slot-bet="${value}">${value} 分</button>`).join('')}
+        </div>
+        <button id="slotSpin" ${model.slotSpinning ? 'disabled' : ''}>${model.slotSpinning ? '滚动中' : inBonus ? '免费转' : '开转'}</button>
       </div>
       <div class="slot-result">
         ${last ? `
           <b>${escapeHtml(last.playerName)}</b> 摇出 ${last.symbols.join(' ')}
-          <span>下注 ${last.bet} · 获得 ${last.payout} · 剩余 ${last.chips}</span>
+          <span>${typeof last.blessingCount === 'number' ? `${last.blessingCount} 个福 · ` : ''}${last.freeSpin ? '奖励免费转' : `下注 ${last.bet} 分`} · 获得 ${last.payout} 分 · 剩余 ${last.chips}${last.bonusSpins ? ` · 免费转 ${last.bonusSpins} 次` : ''}${last.bonusTotal ? ` · 奖励合计 ${last.bonusTotal}` : ''}</span>
         ` : '等待第一局，祝你手气漂亮。'}
       </div>
-      <div class="coin-rain">${isWin ? Array.from({ length: 18 }, (_, index) => `<i style="--d:${index % 6};--x:${(index * 17) % 100}%"></i>`).join('') : ''}</div>
+      <div class="coin-rain">${isWin || isFiveBlessings ? Array.from({ length: isFiveBlessings ? 36 : 18 }, (_, index) => `<i style="--d:${index % 6};--x:${(index * 17) % 100}%"></i>`).join('') : ''}</div>
     </div>
   `;
+}
+
+function slotKey(slot) {
+  if (!slot) return '';
+  return `${slot.playerId}-${slot.symbols.join('')}-${slot.payout}-${slot.chips}-${slot.freeSpin ? 'free' : 'paid'}`;
+}
+
+function renderWinCelebration() {
+  const slot = model.state?.lastSlot;
+  if (!slot || model.tab !== 'casino' || model.slotSpinning || slot.payout <= 0) return '';
+  const key = slotKey(slot);
+  if (model.skippedCelebrationKey === key) return '';
+  const five = slot.bonusTriggered;
+  const title = five ? '五福临门' : slot.blessingCount >= 4 ? '大奖降临' : '恭喜中奖';
+  return `
+    <div class="win-celebration ${five ? 'five-blessing' : ''}" data-celebration-key="${key}">
+      <div class="win-stage">
+        <div class="win-rays"></div>
+        <div class="win-title">${title}</div>
+        <div class="win-symbols">${slot.symbols.map((symbol) => `<span>${symbol}</span>`).join('')}</div>
+        <div class="win-score">获得 <b>${slot.payout}</b> 虚拟分</div>
+        <div class="win-sub">${escapeHtml(slot.playerName)} · ${slot.blessingCount} 个福${five ? ' · 奖励模式开启' : ''}</div>
+        <div class="win-confetti">${Array.from({ length: 46 }, (_, index) => `<i style="--x:${(index * 23) % 100}%;--d:${index % 9};--r:${(index * 37) % 180}deg"></i>`).join('')}</div>
+      </div>
+      <button id="skipCelebration" class="skip-celebration">跳过</button>
+    </div>
+  `;
+}
+
+function bindCelebration() {
+  const button = $('#skipCelebration');
+  if (!button) return;
+  button.addEventListener('click', () => {
+    model.skippedCelebrationKey = button.closest('.win-celebration').dataset.celebrationKey;
+    render();
+  });
 }
 
 function renderBaccaratRound(round) {
@@ -325,11 +412,17 @@ function renderBaccaratRound(round) {
 }
 
 function bindCasino() {
+  document.querySelectorAll('[data-slot-bet]').forEach((button) => {
+    button.addEventListener('click', () => {
+      model.slotBet = Number(button.dataset.slotBet);
+      render();
+    });
+  });
   $('#slotSpin').addEventListener('click', () => {
     if (model.slotSpinning) return;
     model.slotSpinning = true;
     model.slotStartedAt = Date.now();
-    const bet = Number($('#slotBet').value);
+    const bet = model.slotBet;
     render();
     setTimeout(() => send({ type: 'slotSpin', bet }), 850);
     setTimeout(() => {
@@ -338,7 +431,10 @@ function bindCasino() {
     }, 1800);
   });
   document.querySelectorAll('[data-baccarat]').forEach((button) => {
-    button.addEventListener('click', () => send({ type: 'baccaratBet', side: button.dataset.baccarat, amount: Number($('#baccaratAmount').value) }));
+    button.addEventListener('click', () => {
+      model.baccaratAmount = Number($('#baccaratAmount').value) || 20;
+      send({ type: 'baccaratBet', side: button.dataset.baccarat, amount: model.baccaratAmount });
+    });
   });
   $('#baccaratDeal').addEventListener('click', () => send({ type: 'baccaratDeal' }));
 }
@@ -390,10 +486,6 @@ function renderSidePanel() {
         <b>${roleLabel(color)}</b>
         <div class="mt-1 flex flex-wrap gap-1">${typeOrder.map((type) => `<span class="rounded border border-stone-200 px-2 py-1">${pieceNames[color][type]} ${remaining[color][type]}</span>`).join('')}</div>
       </div>`).join('')}
-    </div>
-    <div>
-      <h3 class="mb-2 font-black">娱乐记录</h3>
-      <div class="log-scroll max-h-48 overflow-auto text-sm">${model.state.casinoLog.map((item) => `<p class="mb-2 rounded-md bg-white/70 p-2">${escapeHtml(item.text)}</p>`).join('') || '<p class="text-stone-500">暂无记录。</p>'}</div>
     </div>
   `;
 }
