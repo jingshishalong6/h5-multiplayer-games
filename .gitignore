@@ -3,3 +3,11 @@ node_modules/
 .DS_Store
 *.log
 .superpowers/
+# Build artifacts (not part of this project)
+*.js
+!public/**/*.js
+!tests/**/*.js
+!server.js
+*.zip
+*.png
+*.jpg
