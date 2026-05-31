@@ -4,6 +4,7 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const chess = require('./public/src/chess.js');
 const casino = require('./public/src/casino.js');
+const poker = require('./public/src/poker.js');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -40,7 +41,9 @@ function createRoom(code) {
     chat: [],
     casinoLog: [],
     lastSlot: null,
-    baccarat: { betsOpen: true, bets: {}, lastRound: null }
+    baccarat: { betsOpen: true, bets: {}, lastRound: null },
+    poker: null,
+    pokerBotCount: 5
   };
 }
 
@@ -68,7 +71,7 @@ function publicClient(client) {
   };
 }
 
-function publicState(room) {
+function publicState(room, viewerId) {
   return {
     code: room.code,
     users: [...room.clients.values()].map(publicClient),
@@ -82,13 +85,16 @@ function publicState(room) {
     chat: room.chat.slice(-80),
     casinoLog: room.casinoLog.slice(-30),
     lastSlot: room.lastSlot,
-    baccarat: room.baccarat
+    baccarat: room.baccarat,
+    poker: poker.publicHoldemState(room.poker, viewerId)
   };
 }
 
 function broadcast(room) {
-  const state = publicState(room);
-  room.clients.forEach((client) => send(client.ws, { type: 'state', you: publicClient(client), state }));
+  room.clients.forEach((client) => {
+    const state = publicState(room, client.id);
+    send(client.ws, { type: 'state', you: publicClient(client), state });
+  });
 }
 
 function systemMessage(room, text) {
@@ -270,6 +276,39 @@ function handleBaccaratDeal(client) {
   broadcast(room);
 }
 
+function roomPokerPlayers(room) {
+  return [...room.clients.values()].slice(0, 6).map((client) => ({
+    id: client.id,
+    name: client.name,
+    chips: 1000,
+    bot: false
+  }));
+}
+
+function handlePokerStart(client, payload) {
+  const room = client.room;
+  room.pokerBotCount = Math.max(0, Math.min(5, Number(payload.botCount ?? room.pokerBotCount ?? 5)));
+  room.poker = poker.createHoldemTable({
+    players: roomPokerPlayers(room),
+    botCount: room.pokerBotCount,
+    smallBlind: 5,
+    bigBlind: 10
+  });
+  room.poker = poker.runBots(poker.startHand(room.poker));
+  broadcast(room);
+}
+
+function handlePokerAction(client, payload) {
+  const room = client.room;
+  if (!room.poker || room.poker.stage === 'waiting' || room.poker.stage === 'showdown') return;
+  room.poker = poker.applyAction(room.poker, client.id, {
+    type: payload.action,
+    amount: Number(payload.amount || 0)
+  });
+  room.poker = poker.runBots(room.poker);
+  broadcast(room);
+}
+
 function handleMessage(ws, raw) {
   let payload;
   try {
@@ -296,7 +335,9 @@ function handleMessage(ws, raw) {
     resetResponse: () => handleResetResponse(client, payload),
     slotSpin: () => handleSlot(client, payload),
     baccaratBet: () => handleBaccaratBet(client, payload),
-    baccaratDeal: () => handleBaccaratDeal(client)
+    baccaratDeal: () => handleBaccaratDeal(client),
+    pokerStart: () => handlePokerStart(client, payload),
+    pokerAction: () => handlePokerAction(client, payload)
   };
   if (handlers[payload.type]) handlers[payload.type]();
 }

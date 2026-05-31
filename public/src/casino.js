@@ -127,6 +127,10 @@
     return 10;
   }
 
+  function slotBetMultiplier(bet) {
+    return slotBetTier(bet) / 10;
+  }
+
   function blessingBand(value, bet) {
     const table = FIVE_REEL_BLESSING_TABLES[slotBetTier(bet)];
     return table.find((band) => value < band.max) || table[table.length - 1];
@@ -149,7 +153,7 @@
       const band = symbols ? null : blessingBand(random(), safeBet);
       const result = (symbols || makeBlessingSymbols(band.count, random)).slice(0, count);
       const blessingCount = result.filter((symbol) => symbol === '福').length;
-      const payout = FIVE_REEL_PAYOUTS[blessingCount] || 0;
+      const payout = (FIVE_REEL_PAYOUTS[blessingCount] || 0) * slotBetMultiplier(safeBet);
       return {
         symbols: result,
         reelCount: count,

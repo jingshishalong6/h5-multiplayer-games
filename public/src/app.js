@@ -112,10 +112,11 @@ function render() {
     <nav class="grid grid-cols-3 gap-2 rounded-lg bg-white/70 p-1 text-sm font-bold sm:max-w-md">
       ${tabButton('chess', '象棋')}
       ${tabButton('casino', '娱乐桌')}
+      ${tabButton('poker', '德州')}
       ${tabButton('chat', '聊天')}
     </nav>
     <section class="app-grid grid gap-4 lg:items-start">
-      <div>${model.tab === 'chess' ? renderChess() : model.tab === 'casino' ? renderCasino() : renderChat()}</div>
+      <div>${model.tab === 'chess' ? renderChess() : model.tab === 'casino' ? renderCasino() : model.tab === 'poker' ? renderPoker() : renderChat()}</div>
       <aside class="paper-panel rounded-lg p-4">${renderSidePanel()}</aside>
     </section>
     ${renderWinCelebration()}
@@ -123,6 +124,7 @@ function render() {
   bindCommon();
   if (model.tab === 'chess') bindChess();
   if (model.tab === 'casino') bindCasino();
+  if (model.tab === 'poker') bindPoker();
   if (model.tab === 'chat') bindChat();
   bindCelebration();
 }
@@ -437,6 +439,98 @@ function bindCasino() {
     });
   });
   $('#baccaratDeal').addEventListener('click', () => send({ type: 'baccaratDeal' }));
+}
+
+function renderPoker() {
+  const table = model.state.poker;
+  if (!table) {
+    return `
+      <section class="poker-table rounded-lg p-4">
+        <div class="poker-felt-inner">
+          <h2 class="text-xl font-black text-white">德州扑克好友桌</h2>
+          <p class="mt-2 text-sm text-emerald-100">一个人可与机器人练习，两个人进入同房间也能一起玩。只使用虚拟分。</p>
+          <button id="pokerStart" class="mt-5 rounded-md bg-amber-300 px-5 py-3 font-black text-stone-900">开始德州</button>
+        </div>
+      </section>
+    `;
+  }
+  const active = table.seats.find((seat) => seat.id === table.activeSeatId);
+  const mySeat = table.seats.find((seat) => seat.id === model.you.id);
+  const toCall = mySeat ? Math.max(0, table.currentBet - mySeat.roundBet) : 0;
+  return `
+    <section class="poker-table rounded-lg p-3 sm:p-4">
+      <div class="poker-felt-inner">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-white">
+          <div>
+            <h2 class="text-xl font-black">德州扑克</h2>
+            <p class="text-sm text-emerald-100">${pokerStageName(table.stage)} · 底池 ${table.pot} · 当前行动：${active ? escapeHtml(active.name) : '无'}</p>
+          </div>
+          <button id="pokerStart" class="rounded-md bg-amber-300 px-4 py-2 font-black text-stone-900">新一局</button>
+        </div>
+        <div class="poker-community">${renderPokerCards(table.community)}</div>
+        <div class="poker-seats">${table.seats.map(renderPokerSeat).join('')}</div>
+        ${table.lastResult ? renderPokerResult(table.lastResult) : ''}
+        <div class="poker-actions">
+          <button data-poker-action="fold">弃牌</button>
+          <button data-poker-action="call">${toCall ? `跟注 ${toCall}` : '看牌'}</button>
+          <button data-poker-action="raise" data-amount="${table.currentBet + table.bigBlind}">加注到 ${table.currentBet + table.bigBlind}</button>
+          <button data-poker-action="allIn">全下</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function pokerStageName(stage) {
+  return { waiting: '等待', preflop: '翻牌前', flop: '翻牌圈', turn: '转牌圈', river: '河牌圈', showdown: '摊牌' }[stage] || stage;
+}
+
+function renderPokerCards(cards) {
+  const shown = cards && cards.length ? cards : [null, null, null, null, null];
+  return shown.map((card) => `<span class="poker-card ${card ? suitClass(card.suit) : 'empty'}">${card ? pokerCardText(card) : ''}</span>`).join('');
+}
+
+function pokerCardText(card) {
+  const ranks = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T' };
+  const suits = { s: '♠', h: '♥', d: '♦', c: '♣' };
+  return `${ranks[card.rank] || card.rank}${suits[card.suit] || card.suit}`;
+}
+
+function suitClass(suit) {
+  return suit === 'h' || suit === 'd' ? 'red-suit' : 'black-suit';
+}
+
+function renderPokerSeat(seat) {
+  const active = seat.id === model.state.poker.activeSeatId;
+  return `
+    <div class="poker-seat ${active ? 'active' : ''} ${seat.folded ? 'folded' : ''}">
+      <div class="flex items-center justify-between gap-2">
+        <b>${escapeHtml(seat.name)}${seat.bot ? ' · 机器人' : ''}</b>
+        <span>${seat.chips}</span>
+      </div>
+      <div class="mt-2 flex gap-1">${renderPokerCards(seat.cards)}</div>
+      <div class="mt-2 text-xs text-emerald-100">${seat.folded ? '已弃牌' : seat.allIn ? '全下' : `本轮 ${seat.roundBet}`}</div>
+    </div>
+  `;
+}
+
+function renderPokerResult(result) {
+  return `
+    <div class="poker-result">
+      <b>本局结果：</b>
+      ${result.winners.map((winner) => `${escapeHtml(winner.name)} 赢 ${winner.amount}（${winner.handName}）`).join('，')}
+    </div>
+  `;
+}
+
+function bindPoker() {
+  $('#pokerStart')?.addEventListener('click', () => send({ type: 'pokerStart', botCount: 5 }));
+  document.querySelectorAll('[data-poker-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.pokerAction;
+      send({ type: 'pokerAction', action, amount: Number(button.dataset.amount || 0) });
+    });
+  });
 }
 
 function renderChat() {

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const casino = require('../public/src/casino.js');
 
-test('slot payout applies virtual chip winnings', () => {
+test('three reel slot payout applies virtual chip winnings', () => {
   const result = casino.resolveSlotSpin({
     chips: 1000,
     bet: 20,
@@ -13,10 +13,10 @@ test('slot payout applies virtual chip winnings', () => {
   assert.equal(result.chips, 1180);
 });
 
-test('five reel slot pays five of a kind and triggers five blessing bonus', () => {
+test('five reel slot pays base five blessings and triggers bonus', () => {
   const result = casino.resolveSlotSpin({
     chips: 1000,
-    bet: 20,
+    bet: 10,
     reelCount: 5,
     symbols: ['福', '福', '福', '福', '福']
   });
@@ -25,7 +25,7 @@ test('five reel slot pays five of a kind and triggers five blessing bonus', () =
   assert.equal(result.reelCount, 5);
   assert.equal(result.blessingCount, 5);
   assert.equal(result.payout, 400);
-  assert.equal(result.chips, 1380);
+  assert.equal(result.chips, 1390);
   assert.equal(result.bonusTriggered, true);
 });
 
@@ -43,7 +43,7 @@ test('free slot spin does not deduct the bet', () => {
   assert.equal(result.freeSpin, true);
 });
 
-test('five reel slot does not pay for only two matching symbols', () => {
+test('five reel slot does not pay for only non-blessing matches', () => {
   const result = casino.resolveSlotSpin({
     chips: 1000,
     bet: 20,
@@ -56,7 +56,7 @@ test('five reel slot does not pay for only two matching symbols', () => {
   assert.equal(result.chips, 980);
 });
 
-test('five reel slot pays by blessing count only', () => {
+test('five reel slot base payouts use 10 point tier', () => {
   const two = casino.resolveSlotSpin({ chips: 1000, bet: 10, reelCount: 5, symbols: ['福', '福', '禄', '寿', '财'] });
   const three = casino.resolveSlotSpin({ chips: 1000, bet: 10, reelCount: 5, symbols: ['福', '福', '福', '寿', '财'] });
   const four = casino.resolveSlotSpin({ chips: 1000, bet: 10, reelCount: 5, symbols: ['福', '福', '福', '福', '财'] });
@@ -66,6 +66,26 @@ test('five reel slot pays by blessing count only', () => {
   assert.equal(three.payout, 10);
   assert.equal(four.payout, 50);
   assert.equal(five.payout, 400);
+});
+
+test('five reel slot scales payouts by bet tier', () => {
+  const bet20Two = casino.resolveSlotSpin({ chips: 1000, bet: 20, reelCount: 5, symbols: ['福', '福', '禄', '寿', '财'] });
+  const bet20Three = casino.resolveSlotSpin({ chips: 1000, bet: 20, reelCount: 5, symbols: ['福', '福', '福', '寿', '财'] });
+  const bet20Four = casino.resolveSlotSpin({ chips: 1000, bet: 20, reelCount: 5, symbols: ['福', '福', '福', '福', '财'] });
+  const bet20Five = casino.resolveSlotSpin({ chips: 1000, bet: 20, reelCount: 5, symbols: ['福', '福', '福', '福', '福'] });
+  const bet50Two = casino.resolveSlotSpin({ chips: 1000, bet: 50, reelCount: 5, symbols: ['福', '福', '禄', '寿', '财'] });
+  const bet50Three = casino.resolveSlotSpin({ chips: 1000, bet: 50, reelCount: 5, symbols: ['福', '福', '福', '寿', '财'] });
+  const bet50Four = casino.resolveSlotSpin({ chips: 1000, bet: 50, reelCount: 5, symbols: ['福', '福', '福', '福', '财'] });
+  const bet50Five = casino.resolveSlotSpin({ chips: 1000, bet: 50, reelCount: 5, symbols: ['福', '福', '福', '福', '福'] });
+
+  assert.equal(bet20Two.payout, 7);
+  assert.equal(bet20Three.payout, 20);
+  assert.equal(bet20Four.payout, 100);
+  assert.equal(bet20Five.payout, 800);
+  assert.equal(bet50Two.payout, 17.5);
+  assert.equal(bet50Three.payout, 50);
+  assert.equal(bet50Four.payout, 250);
+  assert.equal(bet50Five.payout, 2000);
 });
 
 test('five reel slot uses lower odds for 10 point bets', () => {
