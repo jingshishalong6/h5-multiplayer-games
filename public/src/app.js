@@ -5,6 +5,15 @@ const pieceNames = {
   black: { king: '将', advisor: '士', elephant: '象', horse: '马', rook: '车', cannon: '炮', soldier: '卒' }
 };
 const typeOrder = ['king', 'advisor', 'elephant', 'horse', 'rook', 'cannon', 'soldier'];
+function getDeviceId() {
+  const key = 'h5-games-device-id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `device-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
 const sideNames = { player: '闲', banker: '庄', tie: '和' };
 
 let ws = null;
@@ -16,6 +25,7 @@ let model = {
   tab: 'chess',
   selected: null,
   legalMoves: [],
+  chessAdvice: null,
   error: '',
   chessHint: '',
   dragFrom: null,
@@ -24,7 +34,10 @@ let model = {
   celebrationSlotKey: '',
   skippedCelebrationKey: '',
   slotBet: 10,
-  baccaratAmount: 20
+  baccaratAmount: 20,
+  deviceId: getDeviceId(),
+  adminPin: '',
+  adminAmount: 100
 };
 
 function send(payload) {
@@ -36,7 +49,7 @@ function connect(name, roomCode) {
   ws = new WebSocket(`${protocol}//${location.host}`);
   ws.addEventListener('open', () => {
     model.connected = true;
-    send({ type: 'join', name, roomCode });
+    send({ type: 'join', name, roomCode, deviceId: model.deviceId });
     render();
   });
   ws.addEventListener('message', (event) => {
@@ -49,6 +62,7 @@ function connect(name, roomCode) {
       model.chessHint = '';
       model.selected = null;
       model.legalMoves = [];
+      model.chessAdvice = null;
     }
     if (message.type === 'error') {
       model.error = message.message;
@@ -113,10 +127,11 @@ function render() {
       ${tabButton('chess', '象棋')}
       ${tabButton('casino', '娱乐桌')}
       ${tabButton('poker', '德州')}
+      ${tabButton('gomoku', '五子棋')}
       ${tabButton('chat', '聊天')}
     </nav>
     <section class="app-grid grid gap-4 lg:items-start">
-      <div>${model.tab === 'chess' ? renderChess() : model.tab === 'casino' ? renderCasino() : model.tab === 'poker' ? renderPoker() : renderChat()}</div>
+      <div>${model.tab === 'chess' ? renderChess() : model.tab === 'casino' ? renderCasino() : model.tab === 'poker' ? renderPoker() : model.tab === 'gomoku' ? renderGomoku() : renderChat()}</div>
       <aside class="paper-panel rounded-lg p-4">${renderSidePanel()}</aside>
     </section>
     ${renderWinCelebration()}
@@ -125,6 +140,7 @@ function render() {
   if (model.tab === 'chess') bindChess();
   if (model.tab === 'casino') bindCasino();
   if (model.tab === 'poker') bindPoker();
+  if (model.tab === 'gomoku') bindGomoku();
   if (model.tab === 'chat') bindChat();
   bindCelebration();
 }
@@ -140,6 +156,7 @@ function bindCommon() {
       render();
     });
   });
+  bindAdminPanel();
 }
 
 function roleLabel(role) {
@@ -159,6 +176,7 @@ function renderChess() {
           <p class="text-sm text-stone-600">${status} · 你是${roleLabel(model.you.role)}</p>
         </div>
         <div class="flex gap-2">
+          <button data-action="advice" class="rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-bold text-stone-900">提示一步</button>
           <button data-action="undo" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">悔棋</button>
           <button data-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重置</button>
         </div>
@@ -203,11 +221,19 @@ function renderBoard(game) {
     const view = BoardView.toView(pos, viewRole);
     return `<button class="dot" data-to-x="${pos.x}" data-to-y="${pos.y}" style="left:${posX(view.x)}%;top:${posY(view.y)}%"></button>`;
   });
+  const adviceMarkers = [];
+  if (model.chessAdvice) {
+    const from = BoardView.toView(model.chessAdvice.from, viewRole);
+    const to = BoardView.toView(model.chessAdvice.to, viewRole);
+    adviceMarkers.push(`<span class="advice-marker advice-from" style="left:${posX(from.x)}%;top:${posY(from.y)}%"></span>`);
+    adviceMarkers.push(`<span class="advice-marker advice-to" style="left:${posX(to.x)}%;top:${posY(to.y)}%"></span>`);
+  }
   return `
     <div id="board" class="board-wrap">
       <div class="board-lines">${lines.join('')}</div>
       <div class="river"><span>楚河</span><span>汉界</span></div>
       ${dots.join('')}
+      ${adviceMarkers.join('')}
       ${pieces.join('')}
     </div>
   `;
@@ -244,6 +270,7 @@ function bindChess() {
       model.dragFrom = null;
     }
   });
+  document.querySelector('[data-action="advice"]').addEventListener('click', showChessAdvice);
   document.querySelector('[data-action="undo"]').addEventListener('click', () => send({ type: 'undoRequest' }));
   document.querySelector('[data-action="reset"]').addEventListener('click', () => send({ type: 'resetRequest' }));
   document.querySelectorAll('[data-response]').forEach((button) => {
@@ -251,9 +278,32 @@ function bindChess() {
   });
 }
 
+function showChessAdvice() {
+  const game = model.state.chess.state;
+  if (model.you.role !== game.turn) {
+    model.chessAdvice = null;
+    model.chessHint = '还没轮到你，提示会在你走棋时可用';
+    render();
+    return;
+  }
+  const advice = ChessCore.recommendMove(game, model.you.role);
+  if (!advice) {
+    model.chessAdvice = null;
+    model.chessHint = '当前没有找到可走提示';
+    render();
+    return;
+  }
+  model.selected = advice.from;
+  model.legalMoves = [advice.to];
+  model.chessAdvice = advice;
+  model.chessHint = '提示：选中高亮棋子，走到金色圆点位置';
+  render();
+}
+
 function selectPiece(x, y) {
   const game = model.state.chess.state;
   const piece = game.board[y][x];
+  model.chessAdvice = null;
   if (model.selected && model.legalMoves.some((move) => move.x === x && move.y === y)) {
     sendMove({ x, y });
     return;
@@ -533,6 +583,53 @@ function bindPoker() {
   });
 }
 
+function renderGomoku() {
+  const game = model.state.gomoku;
+  const users = model.state.users || [];
+  const black = users[0];
+  const white = users[1];
+  const myColor = model.you.id === black?.id ? 'black' : model.you.id === white?.id ? 'white' : 'spectator';
+  const status = game.winner ? `${gomokuColorName(game.winner)}胜利` : `轮到${gomokuColorName(game.turn)}`;
+  return `
+    <section class="paper-panel rounded-lg p-3 sm:p-4">
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 class="text-lg font-black">五子棋</h2>
+          <p class="text-sm text-stone-600">${status} · 你是${myColor === 'spectator' ? '观战' : gomokuColorName(myColor)}</p>
+          <p class="text-xs text-stone-500">黑棋：${escapeHtml(black?.name || '等待')} · 白棋：${escapeHtml(white?.name || '等待')}</p>
+        </div>
+        <button id="gomokuReset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重开</button>
+      </div>
+      <div class="flex justify-center">${renderGomokuBoard(game, myColor)}</div>
+    </section>
+  `;
+}
+
+function gomokuColorName(color) {
+  return { black: '黑棋', white: '白棋' }[color] || color;
+}
+
+function renderGomokuBoard(game, myColor) {
+  return `
+    <div class="gomoku-board" data-my-color="${myColor}">
+      ${game.board.map((row, y) => row.map((stone, x) => `
+        <button class="gomoku-point ${stone || ''} ${game.lastMove?.x === x && game.lastMove?.y === y ? 'last' : ''}" data-x="${x}" data-y="${y}" aria-label="${x},${y}">
+          ${stone ? '<span></span>' : ''}
+        </button>
+      `).join('')).join('')}
+    </div>
+  `;
+}
+
+function bindGomoku() {
+  $('#gomokuReset')?.addEventListener('click', () => send({ type: 'gomokuReset' }));
+  document.querySelectorAll('.gomoku-point').forEach((button) => {
+    button.addEventListener('click', () => {
+      send({ type: 'gomokuPlace', x: Number(button.dataset.x), y: Number(button.dataset.y) });
+    });
+  });
+}
+
 function renderChat() {
   return `
     <section class="paper-panel rounded-lg p-4">
@@ -581,7 +678,37 @@ function renderSidePanel() {
         <div class="mt-1 flex flex-wrap gap-1">${typeOrder.map((type) => `<span class="rounded border border-stone-200 px-2 py-1">${pieceNames[color][type]} ${remaining[color][type]}</span>`).join('')}</div>
       </div>`).join('')}
     </div>
+    <div class="rounded-md bg-white/70 p-3 text-sm">
+      <h3 class="mb-2 font-black">管理员调分</h3>
+      <input id="adminPin" class="mb-2 w-full rounded border border-stone-300 px-2 py-2" type="password" placeholder="管理员密码" value="${escapeHtml(model.adminPin)}" />
+      <select id="adminTarget" class="mb-2 w-full rounded border border-stone-300 px-2 py-2">
+        ${model.state.users.map((user) => `<option value="${escapeHtml(user.deviceId)}">${escapeHtml(user.name)} · ${user.chips}</option>`).join('')}
+      </select>
+      <input id="adminAmount" class="mb-2 w-full rounded border border-stone-300 px-2 py-2" type="number" min="1" value="${model.adminAmount}" />
+      <div class="grid grid-cols-2 gap-2">
+        <button data-admin-adjust="add" class="rounded bg-emerald-700 px-2 py-2 font-bold text-white">增加</button>
+        <button data-admin-adjust="sub" class="rounded bg-red-700 px-2 py-2 font-bold text-white">减少</button>
+      </div>
+    </div>
   `;
+}
+
+function bindAdminPanel() {
+  const pinInput = $('#adminPin');
+  const amountInput = $('#adminAmount');
+  const targetInput = $('#adminTarget');
+  if (pinInput) pinInput.addEventListener('input', () => { model.adminPin = pinInput.value; });
+  if (amountInput) amountInput.addEventListener('input', () => { model.adminAmount = Number(amountInput.value) || 1; });
+  document.querySelectorAll('[data-admin-adjust]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!targetInput) return;
+      const amount = Math.max(1, Number(amountInput.value || model.adminAmount || 1));
+      const delta = button.dataset.adminAdjust === 'add' ? amount : -amount;
+      model.adminPin = pinInput?.value || model.adminPin;
+      model.adminAmount = amount;
+      send({ type: 'adminAdjust', pin: model.adminPin, deviceId: targetInput.value, delta });
+    });
+  });
 }
 
 function escapeHtml(value) {

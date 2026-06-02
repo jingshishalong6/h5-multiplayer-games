@@ -11,6 +11,37 @@ test('horse cannot move when its leg is blocked', () => {
   assert.match(blocked.reason, /illegal/i);
 });
 
+test('recommend move prefers a checkmating move', () => {
+  const state = chess.createEmptyState('red');
+  state.board[0][4] = chess.makePiece('black', 'king');
+  state.board[9][4] = chess.makePiece('red', 'king');
+  state.board[2][4] = chess.makePiece('red', 'rook');
+  state.board[1][3] = chess.makePiece('red', 'rook');
+  state.board[1][5] = chess.makePiece('red', 'rook');
+  state.board[0][3] = chess.makePiece('red', 'soldier');
+  state.board[0][5] = chess.makePiece('red', 'soldier');
+
+  const advice = chess.recommendMove(state, 'red');
+  const result = chess.movePiece(state, advice.from, advice.to);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state.winner, 'red');
+});
+
+test('recommend move prefers capturing a high value piece', () => {
+  const state = chess.createEmptyState('red');
+  state.board[0][3] = chess.makePiece('black', 'king');
+  state.board[9][4] = chess.makePiece('red', 'king');
+  state.board[5][0] = chess.makePiece('red', 'rook');
+  state.board[4][0] = chess.makePiece('black', 'horse');
+  state.board[5][1] = chess.makePiece('black', 'rook');
+
+  const advice = chess.recommendMove(state, 'red');
+
+  assert.deepEqual(advice.from, { x: 0, y: 5 });
+  assert.deepEqual(advice.to, { x: 1, y: 5 });
+});
+
 test('cannon capture requires exactly one screen piece', () => {
   const state = chess.createInitialState();
 

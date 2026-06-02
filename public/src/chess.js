@@ -19,6 +19,16 @@
     black: { king: '将', advisor: '士', elephant: '象', horse: '马', rook: '车', cannon: '炮', soldier: '卒' }
   };
 
+  const PIECE_VALUES = {
+    king: 10000,
+    rook: 90,
+    cannon: 50,
+    horse: 45,
+    advisor: 20,
+    elephant: 20,
+    soldier: 10
+  };
+
   let nextId = 1;
 
   function other(color) {
@@ -281,6 +291,49 @@
     return next;
   }
 
+  function materialScore(state, color) {
+    return state.board.flat().reduce((score, piece) => {
+      if (!piece) return score;
+      const value = PIECE_VALUES[piece.type] || 0;
+      return score + (piece.color === color ? value : -value);
+    }, 0);
+  }
+
+  function positionalScore(piece, to) {
+    const centerDistance = Math.abs(to.x - 4) + Math.abs(to.y - 4.5);
+    let score = Math.max(0, 10 - centerDistance);
+    if (piece.type === 'soldier' && crossedRiver(piece.color, to.y)) score += 8;
+    return score;
+  }
+
+  function recommendMove(state, color = state.turn) {
+    if (!state || state.winner || color !== state.turn) return null;
+    let best = null;
+
+    for (let y = 0; y < HEIGHT; y += 1) {
+      for (let x = 0; x < WIDTH; x += 1) {
+        const piece = state.board[y][x];
+        if (!piece || piece.color !== color) continue;
+        const from = { x, y };
+        getLegalMoves(state, from).forEach((to) => {
+          const target = state.board[to.y][to.x];
+          if (target && target.type === 'king') return;
+          const result = movePiece(state, from, to);
+          if (!result.ok) return;
+          let score = materialScore(result.state, color) * 10 + positionalScore(piece, to);
+          if (target) score += (PIECE_VALUES[target.type] || 0) * 100;
+          if (result.state.status === 'check') score += 600;
+          if (result.state.winner === color) score += 1000000;
+          if (!best || score > best.score) {
+            best = { from, to, score, captured: target ? { ...target } : null };
+          }
+        });
+      }
+    }
+
+    return best;
+  }
+
   return {
     WIDTH,
     HEIGHT,
@@ -296,6 +349,7 @@
     isCheckmate,
     remainingPieces,
     movePrompt,
-    undoLastMove
+    undoLastMove,
+    recommendMove
   };
 });

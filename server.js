@@ -5,6 +5,8 @@ const { WebSocketServer } = require('ws');
 const chess = require('./public/src/chess.js');
 const casino = require('./public/src/casino.js');
 const poker = require('./public/src/poker.js');
+const accounts = require('./public/src/accounts.js');
+const gomoku = require('./public/src/gomoku.js');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -17,6 +19,7 @@ const MIME = {
 };
 
 const rooms = new Map();
+const accountStore = accounts.createAccountStore({ adminPin: process.env.ADMIN_PIN || 'w1210118007' });
 
 function send(ws, message) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
@@ -43,7 +46,8 @@ function createRoom(code) {
     lastSlot: null,
     baccarat: { betsOpen: true, bets: {}, lastRound: null },
     poker: null,
-    pokerBotCount: 5
+    pokerBotCount: 5,
+    gomoku: gomoku.createInitialState()
   };
 }
 
@@ -63,6 +67,7 @@ function assignSeats(room) {
 function publicClient(client) {
   return {
     id: client.id,
+    deviceId: client.deviceId,
     name: client.name,
     role: client.role,
     chips: client.chips,
@@ -86,7 +91,8 @@ function publicState(room, viewerId) {
     casinoLog: room.casinoLog.slice(-30),
     lastSlot: room.lastSlot,
     baccarat: room.baccarat,
-    poker: poker.publicHoldemState(room.poker, viewerId)
+    poker: poker.publicHoldemState(room.poker, viewerId),
+    gomoku: room.gomoku
   };
 }
 
@@ -116,15 +122,31 @@ function addCasinoLog(room, text) {
   room.casinoLog.push({ id: Date.now() + Math.random(), text, time: new Date().toLocaleTimeString('zh-CN', { hour12: false }) });
 }
 
+function persistClientBalance(client) {
+  if (!client || !client.deviceId) return;
+  client.account = accountStore.setBalance(client.deviceId, client.chips);
+}
+
+function syncRoomClientsFromAccounts(room) {
+  room.clients.forEach((client) => {
+    client.account = accountStore.getOrCreate(client.deviceId, client.name);
+    client.chips = client.account.balance;
+  });
+}
+
 function handleJoin(ws, payload) {
   const room = getRoom(payload.roomCode);
+  const deviceId = String(payload.deviceId || `guest-${Math.random().toString(36).slice(2)}`).slice(0, 80);
+  const account = accountStore.getOrCreate(deviceId, normalizeName(payload.name));
   const client = {
     id: Math.random().toString(36).slice(2, 10),
+    deviceId,
+    account,
     ws,
     room,
     name: normalizeName(payload.name),
     role: 'spectator',
-    chips: 1000,
+    chips: account.balance,
     bonusSpins: 0,
     bonusTotal: 0,
     joinedAt: Date.now() + Math.random()
@@ -223,6 +245,7 @@ function handleSlot(client, payload) {
   const freeSpin = client.bonusSpins > 0;
   const result = casino.resolveSlotSpin({ chips: client.chips, bet, reelCount: 5, freeSpin });
   client.chips = result.chips;
+  persistClientBalance(client);
   if (freeSpin) {
     client.bonusSpins -= 1;
     client.bonusTotal += result.payout;
@@ -269,6 +292,7 @@ function handleBaccaratDeal(client) {
     if (Object.values(bets).some(Boolean)) {
       const settled = casino.settleBaccaratBets({ chips: player.chips, bets, winner: round.winner });
       player.chips = settled.chips;
+      persistClientBalance(player);
     }
   });
   room.baccarat = { betsOpen: true, bets: {}, lastRound: round };
@@ -280,9 +304,20 @@ function roomPokerPlayers(room) {
   return [...room.clients.values()].slice(0, 6).map((client) => ({
     id: client.id,
     name: client.name,
-    chips: 1000,
+    chips: client.chips,
     bot: false
   }));
+}
+
+function syncPokerBalances(room) {
+  if (!room.poker) return;
+  room.poker.seats.forEach((seat) => {
+    if (seat.bot) return;
+    const client = room.clients.get(seat.id);
+    if (!client) return;
+    client.chips = seat.chips;
+    persistClientBalance(client);
+  });
 }
 
 function handlePokerStart(client, payload) {
@@ -295,6 +330,7 @@ function handlePokerStart(client, payload) {
     bigBlind: 10
   });
   room.poker = poker.runBots(poker.startHand(room.poker));
+  syncPokerBalances(room);
   broadcast(room);
 }
 
@@ -306,7 +342,58 @@ function handlePokerAction(client, payload) {
     amount: Number(payload.amount || 0)
   });
   room.poker = poker.runBots(room.poker);
+  syncPokerBalances(room);
   broadcast(room);
+}
+
+function handleAdminAdjust(client, payload) {
+  const room = client.room;
+  const target = [...room.clients.values()].find((item) => item.deviceId === payload.deviceId || item.id === payload.userId);
+  if (!target) {
+    send(client.ws, { type: 'error', message: '找不到这个用户' });
+    return;
+  }
+  try {
+    const account = accountStore.adjust(target.deviceId, Number(payload.delta || 0), payload.pin);
+    target.chips = account.balance;
+    target.account = account;
+    if (room.poker) {
+      const seat = room.poker.seats.find((item) => item.id === target.id && !item.bot);
+      if (seat) seat.chips = account.balance;
+    }
+    systemMessage(room, `管理员调整了 ${target.name} 的虚拟分：${payload.delta > 0 ? '+' : ''}${Number(payload.delta || 0)}，当前 ${account.balance}`);
+  } catch {
+    send(client.ws, { type: 'error', message: '管理员密码不正确' });
+  }
+}
+
+function gomokuColorForClient(room, client) {
+  const players = [...room.clients.values()].sort((a, b) => a.joinedAt - b.joinedAt).slice(0, 2);
+  const index = players.findIndex((item) => item.id === client.id);
+  if (index === 0) return 'black';
+  if (index === 1) return 'white';
+  return 'spectator';
+}
+
+function handleGomokuPlace(client, payload) {
+  const room = client.room;
+  const color = gomokuColorForClient(room, client);
+  if (!['black', 'white'].includes(color)) {
+    send(client.ws, { type: 'error', message: '你是观战，不能落子' });
+    return;
+  }
+  const result = gomoku.placeStone(room.gomoku, Number(payload.x), Number(payload.y), color);
+  if (!result.ok) {
+    send(client.ws, { type: 'error', message: result.reason || '不能落在这里' });
+    return;
+  }
+  room.gomoku = result.state;
+  broadcast(room);
+}
+
+function handleGomokuReset(client) {
+  client.room.gomoku = gomoku.createInitialState();
+  broadcast(client.room);
 }
 
 function handleMessage(ws, raw) {
@@ -337,7 +424,10 @@ function handleMessage(ws, raw) {
     baccaratBet: () => handleBaccaratBet(client, payload),
     baccaratDeal: () => handleBaccaratDeal(client),
     pokerStart: () => handlePokerStart(client, payload),
-    pokerAction: () => handlePokerAction(client, payload)
+    pokerAction: () => handlePokerAction(client, payload),
+    adminAdjust: () => handleAdminAdjust(client, payload),
+    gomokuPlace: () => handleGomokuPlace(client, payload),
+    gomokuReset: () => handleGomokuReset(client)
   };
   if (handlers[payload.type]) handlers[payload.type]();
 }
