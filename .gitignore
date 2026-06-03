@@ -10,7 +10,10 @@ node_modules/
 !server.js
 !engine-advisor.js
 !scripts/**/*.js
-.engine/
+.engine/*
+!.engine/pikafish-linux
+!.engine/pikafish.nnue
+!.engine/pikafish-path.txt
 *.zip
 *.png
 *.jpg

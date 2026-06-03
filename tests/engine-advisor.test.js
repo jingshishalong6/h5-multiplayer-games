@@ -29,7 +29,7 @@ test('asks an external UCI engine for bestmove when configured', async () => {
   const state = chess.createInitialState();
   const advice = await engineAdvisor.getEngineAdvice(state, 'red', {
     enginePath: process.execPath,
-    engineArgs: ['tests/fixtures/fake-uci-engine.js'],
+    engineArgs: [path.join(__dirname, 'fixtures', 'fake-uci-engine.js')],
     movetime: 120,
     fallback: () => null
   });
@@ -46,10 +46,10 @@ test('resolves engine path from generated setup file when env is empty', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pikafish-path-'));
   const engineDir = path.join(root, '.engine');
   fs.mkdirSync(engineDir);
-  fs.writeFileSync(path.join(engineDir, 'pikafish-path.txt'), '/opt/render/project/src/.engine/pikafish');
+  fs.writeFileSync(path.join(engineDir, 'pikafish-path.txt'), '.engine/pikafish');
 
   assert.equal(
     engineAdvisor.resolveEnginePath({ root, env: {} }),
-    '/opt/render/project/src/.engine/pikafish'
+    path.join(root, '.engine', 'pikafish')
   );
 });

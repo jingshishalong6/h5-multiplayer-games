@@ -17,7 +17,8 @@ function resolveEnginePath({ root = process.cwd(), env = process.env } = {}) {
   if (env.PIKAFISH_PATH || env.CHESS_ENGINE_PATH) return env.PIKAFISH_PATH || env.CHESS_ENGINE_PATH;
   const generatedPathFile = path.join(root, '.engine', 'pikafish-path.txt');
   try {
-    return fs.readFileSync(generatedPathFile, 'utf8').trim();
+    const resolved = fs.readFileSync(generatedPathFile, 'utf8').trim();
+    return path.isAbsolute(resolved) ? resolved : path.join(root, resolved);
   } catch {
     return '';
   }
@@ -40,7 +41,7 @@ function runUciEngine({ enginePath, engineArgs = [], fen, movetime = DEFAULT_MOV
     }
 
     const child = spawn(enginePath, engineArgs, {
-      cwd: process.cwd(),
+      cwd: path.dirname(enginePath),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true
     });

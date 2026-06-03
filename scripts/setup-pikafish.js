@@ -97,7 +97,7 @@ async function main() {
   const binary = findEngineBinary();
   if (!binary) throw new Error('could not find Pikafish Linux executable in archive');
   fs.chmodSync(binary, 0o755);
-  fs.writeFileSync(PATH_FILE, binary);
+  fs.writeFileSync(PATH_FILE, path.relative(ROOT, binary).replace(/\\/g, '/'));
   console.log(`Pikafish prepared: ${binary}`);
 }
 
