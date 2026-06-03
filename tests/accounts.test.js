@@ -21,7 +21,14 @@ test('admin pin controls add and subtract adjustments', () => {
   const store = accounts.createAccountStore({ adminPin: '123456' });
 
   assert.throws(() => store.adjust('phone-a', 200, 'bad'), /admin/i);
-  assert.equal(store.adjust('phone-a', 200, '123456').balance, 1200);
-  assert.equal(store.adjust('phone-a', -500, '123456').balance, 700);
+  assert.equal(store.adjust('phone-a', 200, '123456').balance, 1000);
+  assert.equal(store.adjust('phone-a', -500, '123456').balance, 500);
   assert.equal(store.adjust('phone-a', -9999, '123456').balance, 0);
+});
+
+test('account balances are capped between 0 and 1000 virtual points', () => {
+  const store = accounts.createAccountStore({ adminPin: '123456' });
+
+  assert.equal(store.setBalance('phone-a', 1600).balance, 1000);
+  assert.equal(store.setBalance('phone-a', -50).balance, 0);
 });

@@ -13,6 +13,16 @@ test('evaluates royal flush above lower straight flush', () => {
   assert.equal(poker.compareHands(royal, straightFlush) > 0, true);
 });
 
+test('new holdem table keeps a real player zero balance instead of refreshing to 1000', () => {
+  const table = poker.createHoldemTable({
+    players: [{ id: 'u1', name: 'player', chips: 0, bot: false }],
+    botCount: 1,
+    random: () => 0
+  });
+
+  assert.equal(table.seats[0].chips, 0);
+});
+
 test('evaluates ace-low wheel straight', () => {
   const hand = poker.evaluateBestHand([c(14), c(2, 'h'), c(3, 'd'), c(4, 'c'), c(5, 's'), c(9, 'h'), c(11, 'd')]);
 

@@ -140,7 +140,7 @@
     const realSeats = players.slice(0, 6).map((player, index) => ({
       id: player.id,
       name: player.name || `玩家${index + 1}`,
-      chips: Number(player.chips || 1000),
+      chips: Number(player.chips ?? 1000),
       bot: Boolean(player.bot),
       cards: [],
       folded: false,

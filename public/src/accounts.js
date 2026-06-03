@@ -3,6 +3,7 @@
   else root.AccountStore = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   const INITIAL_BALANCE = 1000;
+  const MAX_BALANCE = 1000;
 
   function normalizeDeviceId(deviceId) {
     return String(deviceId || '').trim().slice(0, 80) || 'unknown-device';
@@ -29,7 +30,7 @@
 
     function setBalance(deviceId, balance) {
       const account = getOrCreate(deviceId);
-      account.balance = Math.max(0, Number(balance || 0));
+      account.balance = Math.max(0, Math.min(MAX_BALANCE, Number(balance || 0)));
       account.updatedAt = Date.now();
       return account;
     }
@@ -54,6 +55,7 @@
 
   return {
     INITIAL_BALANCE,
+    MAX_BALANCE,
     createAccountStore
   };
 });

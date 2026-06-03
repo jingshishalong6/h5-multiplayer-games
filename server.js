@@ -125,6 +125,7 @@ function addCasinoLog(room, text) {
 function persistClientBalance(client) {
   if (!client || !client.deviceId) return;
   client.account = accountStore.setBalance(client.deviceId, client.chips);
+  client.chips = client.account.balance;
 }
 
 function syncRoomClientsFromAccounts(room) {
