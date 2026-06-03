@@ -41,3 +41,10 @@ test('admin pin can be checked without changing balances', () => {
   assert.equal(store.isAdminPin('123456'), true);
   assert.equal(store.getOrCreate('phone-a').balance, 640);
 });
+
+test('default admin pin is 1234', () => {
+  const store = accounts.createAccountStore();
+
+  assert.equal(store.isAdminPin('1234'), true);
+  assert.equal(store.isAdminPin('w1210118007'), false);
+});

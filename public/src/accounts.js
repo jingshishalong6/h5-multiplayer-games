@@ -9,7 +9,7 @@
     return String(deviceId || '').trim().slice(0, 80) || 'unknown-device';
   }
 
-  function createAccountStore({ adminPin = '888888' } = {}) {
+  function createAccountStore({ adminPin = '1234' } = {}) {
     const accounts = new Map();
 
     function getOrCreate(deviceId, name = '') {
@@ -36,11 +36,11 @@
     }
 
     function requireAdmin(pin) {
-      if (String(pin || '') !== String(adminPin || '888888')) throw new Error('admin pin required');
+      if (String(pin || '') !== String(adminPin || '1234')) throw new Error('admin pin required');
     }
 
     function isAdminPin(pin) {
-      return String(pin || '') === String(adminPin || '888888');
+      return String(pin || '') === String(adminPin || '1234');
     }
 
     function adjust(deviceId, delta, pin) {

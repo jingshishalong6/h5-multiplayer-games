@@ -20,7 +20,7 @@ const MIME = {
 };
 
 const rooms = new Map();
-const accountStore = accounts.createAccountStore({ adminPin: process.env.ADMIN_PIN || 'w1210118007' });
+const accountStore = accounts.createAccountStore({ adminPin: process.env.ADMIN_PIN || '1234' });
 
 function send(ws, message) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
