@@ -7,6 +7,7 @@ const casino = require('./public/src/casino.js');
 const poker = require('./public/src/poker.js');
 const accounts = require('./public/src/accounts.js');
 const gomoku = require('./public/src/gomoku.js');
+const engineAdvisor = require('./engine-advisor.js');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -183,6 +184,26 @@ function handleMove(client, payload) {
   room.pendingUndo = null;
   room.pendingReset = null;
   broadcast(room);
+}
+
+async function handleChessEngineAdvice(client, payload) {
+  const room = client.room;
+  if (client.role !== room.chess.turn) {
+    send(client.ws, { type: 'chessAdvice', ok: false, message: '还没轮到你，不能请求引擎提示' });
+    return;
+  }
+  const state = chess.cloneState(room.chess);
+  const level = ['amateur', 'city', 'top'].includes(payload.level) ? payload.level : 'city';
+  const movetime = { amateur: 900, city: 1800, top: 3200 }[level];
+  const advice = await engineAdvisor.getEngineAdvice(state, client.role, {
+    movetime,
+    fallback: () => chess.recommendExpertMove(state, client.role, { level })
+  });
+  if (!advice) {
+    send(client.ws, { type: 'chessAdvice', ok: false, message: '当前没有找到可走提示' });
+    return;
+  }
+  send(client.ws, { type: 'chessAdvice', ok: true, advice });
 }
 
 function handleChat(client, payload) {
@@ -397,7 +418,7 @@ function handleGomokuReset(client) {
   broadcast(client.room);
 }
 
-function handleMessage(ws, raw) {
+async function handleMessage(ws, raw) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -417,6 +438,7 @@ function handleMessage(ws, raw) {
   const handlers = {
     chat: () => handleChat(client, payload),
     chessMove: () => handleMove(client, payload),
+    chessEngineAdvice: () => handleChessEngineAdvice(client, payload),
     undoRequest: () => handleUndoRequest(client),
     undoResponse: () => handleUndoResponse(client, payload),
     resetRequest: () => handleResetRequest(client),
@@ -430,7 +452,7 @@ function handleMessage(ws, raw) {
     gomokuPlace: () => handleGomokuPlace(client, payload),
     gomokuReset: () => handleGomokuReset(client)
   };
-  if (handlers[payload.type]) handlers[payload.type]();
+  if (handlers[payload.type]) await handlers[payload.type]();
 }
 
 function removeClient(ws) {
@@ -469,7 +491,9 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
   send(ws, { type: 'hello' });
-  ws.on('message', (raw) => handleMessage(ws, raw));
+  ws.on('message', (raw) => {
+    handleMessage(ws, raw).catch((error) => send(ws, { type: 'error', message: error.message || '服务器处理失败' }));
+  });
   ws.on('close', () => removeClient(ws));
 });
 

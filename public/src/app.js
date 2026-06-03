@@ -75,6 +75,15 @@ function connect(name, roomCode) {
       model.error = message.message;
       model.chessHint = ChessHints.errorHint(message.message);
     }
+    if (message.type === 'chessAdvice') {
+      model.chessAdviceThinking = false;
+      if (!message.ok || !message.advice) {
+        model.chessAdvice = null;
+        model.chessHint = message.message || '当前没有找到可走提示';
+      } else {
+        applyChessAdvice(message.advice);
+      }
+    }
     render();
   });
   ws.addEventListener('close', () => {
@@ -192,7 +201,7 @@ function renderChess() {
             ${adviceLevelOption('city', '市级棋手')}
             ${adviceLevelOption('top', '软件顶尖')}
           </select>
-          <button data-action="advice" class="rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-bold text-stone-900">${model.chessAdviceThinking ? 'AI思考中' : '高手提示'}</button>
+          <button data-action="advice" class="rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-bold text-stone-900">${model.chessAdviceThinking ? '引擎思考中' : '引擎提示'}</button>
           <button data-action="undo" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">悔棋</button>
           <button data-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重置</button>
         </div>
@@ -314,29 +323,22 @@ function showChessAdvice() {
   }
   model.chessAdvice = null;
   model.chessAdviceThinking = true;
-  model.chessHint = `${adviceLevelName(model.chessAdviceLevel)}AI思考中...`;
+  model.chessHint = `${adviceLevelName(model.chessAdviceLevel)}引擎思考中...`;
   render();
-  setTimeout(() => {
-    const latest = model.state.chess.state;
-    const advice = ChessCore.recommendExpertMove(latest, model.you.role, { level: model.chessAdviceLevel }) ||
-      ChessCore.recommendMove(latest, model.you.role);
-    model.chessAdviceThinking = false;
-    if (!advice) {
-      model.chessAdvice = null;
-      model.chessHint = '当前没有找到可走提示';
-      render();
-      return;
-    }
-    model.selected = advice.from;
-    model.legalMoves = [advice.to];
-    model.chessAdvice = advice;
-    model.chessHint = `${advice.levelLabel || '高手'}提示：${advice.uci || ''}，选中高亮棋子，走到金色圆点位置`;
-    render();
-  }, 30);
+  send({ type: 'chessEngineAdvice', level: model.chessAdviceLevel });
 }
 
 function adviceLevelName(level) {
   return { amateur: '业余高手', city: '市级棋手', top: '软件顶尖' }[level] || '市级棋手';
+}
+
+function applyChessAdvice(advice) {
+  model.selected = advice.from;
+  model.legalMoves = [advice.to];
+  model.chessAdvice = advice;
+  const source = advice.source === 'pikafish' ? '皮卡鱼引擎' : '普通本地提示';
+  const note = advice.engineAvailable ? '真引擎' : '未检测到Pikafish，已回退';
+  model.chessHint = `${source}：${advice.uci || ''}（${note}），选中高亮棋子，走到金色圆点位置`;
 }
 
 function selectPiece(x, y) {
