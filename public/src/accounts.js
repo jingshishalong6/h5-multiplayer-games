@@ -39,6 +39,10 @@
       if (String(pin || '') !== String(adminPin || '888888')) throw new Error('admin pin required');
     }
 
+    function isAdminPin(pin) {
+      return String(pin || '') === String(adminPin || '888888');
+    }
+
     function adjust(deviceId, delta, pin) {
       requireAdmin(pin);
       const account = getOrCreate(deviceId);
@@ -49,6 +53,7 @@
       getOrCreate,
       setBalance,
       adjust,
+      isAdminPin,
       list: () => [...accounts.values()]
     };
   }

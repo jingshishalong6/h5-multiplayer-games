@@ -75,6 +75,11 @@ function connect(name, roomCode) {
       model.error = message.message;
       model.chessHint = ChessHints.errorHint(message.message);
     }
+    if (message.type === 'adminStatus') {
+      model.error = message.ok ? '' : message.message;
+      if (model.you) model.you.isAdmin = !!message.isAdmin;
+      if (message.ok) model.chessHint = message.message;
+    }
     if (message.type === 'chessAdvice') {
       model.chessAdviceThinking = false;
       if (!message.ok || !message.advice) {
@@ -188,6 +193,13 @@ function renderChess() {
   const status = game.winner ? `${roleLabel(game.winner)}胜，将死` : game.status === 'check' ? `${roleLabel(game.turn)}被将军` : `轮到${roleLabel(game.turn)}`;
   const notice = model.state.chess.notice || '';
   const hint = model.chessHint || ChessHints.turnHint(game, model.you.role);
+  const engineControls = model.you.isAdmin ? `
+          <select id="adviceLevel" class="rounded-md border border-amber-300 bg-white px-2 py-2 text-sm font-bold text-stone-900">
+            ${adviceLevelOption('amateur', '业余高手')}
+            ${adviceLevelOption('city', '市级棋手')}
+            ${adviceLevelOption('top', '软件顶尖')}
+          </select>
+          <button data-action="advice" class="rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-bold text-stone-900">${model.chessAdviceThinking ? '引擎思考中' : '引擎提示'}</button>` : '';
   return `
     <section class="paper-panel rounded-lg p-3 sm:p-4">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -196,12 +208,7 @@ function renderChess() {
           <p class="text-sm text-stone-600">${status} · 你是${roleLabel(model.you.role)}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <select id="adviceLevel" class="rounded-md border border-amber-300 bg-white px-2 py-2 text-sm font-bold text-stone-900">
-            ${adviceLevelOption('amateur', '业余高手')}
-            ${adviceLevelOption('city', '市级棋手')}
-            ${adviceLevelOption('top', '软件顶尖')}
-          </select>
-          <button data-action="advice" class="rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-bold text-stone-900">${model.chessAdviceThinking ? '引擎思考中' : '引擎提示'}</button>
+          ${engineControls}
           <button data-action="undo" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">悔棋</button>
           <button data-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重置</button>
         </div>
@@ -305,7 +312,8 @@ function bindChess() {
       render();
     });
   }
-  document.querySelector('[data-action="advice"]').addEventListener('click', showChessAdvice);
+  const adviceButton = document.querySelector('[data-action="advice"]');
+  if (adviceButton) adviceButton.addEventListener('click', showChessAdvice);
   document.querySelector('[data-action="undo"]').addEventListener('click', () => send({ type: 'undoRequest' }));
   document.querySelector('[data-action="reset"]').addEventListener('click', () => send({ type: 'resetRequest' }));
   document.querySelectorAll('[data-response]').forEach((button) => {
@@ -315,6 +323,12 @@ function bindChess() {
 
 function showChessAdvice() {
   const game = model.state.chess.state;
+  if (!model.you.isAdmin) {
+    model.chessAdvice = null;
+    model.chessHint = '只有管理员可以使用真引擎提示';
+    render();
+    return;
+  }
   if (model.you.role !== game.turn) {
     model.chessAdvice = null;
     model.chessHint = '还没轮到你，提示会在你走棋时可用';
@@ -325,7 +339,7 @@ function showChessAdvice() {
   model.chessAdviceThinking = true;
   model.chessHint = `${adviceLevelName(model.chessAdviceLevel)}引擎思考中...`;
   render();
-  send({ type: 'chessEngineAdvice', level: model.chessAdviceLevel });
+  send({ type: 'chessEngineAdvice', level: model.chessAdviceLevel, pin: model.adminPin });
 }
 
 function adviceLevelName(level) {
@@ -722,6 +736,8 @@ function renderSidePanel() {
     <div class="rounded-md bg-white/70 p-3 text-sm">
       <h3 class="mb-2 font-black">管理员调分</h3>
       <input id="adminPin" class="mb-2 w-full rounded border border-stone-300 px-2 py-2" type="password" placeholder="管理员密码" value="${escapeHtml(model.adminPin)}" />
+      <button data-admin-login class="mb-2 w-full rounded bg-stone-900 px-2 py-2 font-bold text-white">${model.you.isAdmin ? '管理员已登录' : '登录管理员'}</button>
+      <p class="mb-2 text-xs ${model.you.isAdmin ? 'text-emerald-700' : 'text-stone-500'}">${model.you.isAdmin ? '真引擎提示仅你可见。' : '登录后才显示象棋真引擎提示。'}</p>
       <select id="adminTarget" class="mb-2 w-full rounded border border-stone-300 px-2 py-2">
         ${model.state.users.map((user) => `<option value="${escapeHtml(user.deviceId)}">${escapeHtml(user.name)} · ${user.chips}</option>`).join('')}
       </select>
@@ -740,6 +756,13 @@ function bindAdminPanel() {
   const targetInput = $('#adminTarget');
   if (pinInput) pinInput.addEventListener('input', () => { model.adminPin = pinInput.value; });
   if (amountInput) amountInput.addEventListener('input', () => { model.adminAmount = Number(amountInput.value) || 1; });
+  const loginButton = document.querySelector('[data-admin-login]');
+  if (loginButton) {
+    loginButton.addEventListener('click', () => {
+      model.adminPin = pinInput?.value || model.adminPin;
+      send({ type: 'adminLogin', pin: model.adminPin });
+    });
+  }
   document.querySelectorAll('[data-admin-adjust]').forEach((button) => {
     button.addEventListener('click', () => {
       if (!targetInput) return;

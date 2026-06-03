@@ -65,8 +65,8 @@ function assignSeats(room) {
   });
 }
 
-function publicClient(client) {
-  return {
+function publicClient(client, includePrivate = false) {
+  const data = {
     id: client.id,
     deviceId: client.deviceId,
     name: client.name,
@@ -75,6 +75,8 @@ function publicClient(client) {
     bonusSpins: client.bonusSpins || 0,
     bonusTotal: client.bonusTotal || 0
   };
+  if (includePrivate) data.isAdmin = !!client.isAdmin;
+  return data;
 }
 
 function publicState(room, viewerId) {
@@ -100,7 +102,7 @@ function publicState(room, viewerId) {
 function broadcast(room) {
   room.clients.forEach((client) => {
     const state = publicState(room, client.id);
-    send(client.ws, { type: 'state', you: publicClient(client), state });
+    send(client.ws, { type: 'state', you: publicClient(client, true), state });
   });
 }
 
@@ -149,6 +151,7 @@ function handleJoin(ws, payload) {
     name: normalizeName(payload.name),
     role: 'spectator',
     chips: account.balance,
+    isAdmin: false,
     bonusSpins: 0,
     bonusTotal: 0,
     joinedAt: Date.now() + Math.random()
@@ -188,6 +191,11 @@ function handleMove(client, payload) {
 
 async function handleChessEngineAdvice(client, payload) {
   const room = client.room;
+  if (!client.isAdmin && !accountStore.isAdminPin(payload.pin)) {
+    send(client.ws, { type: 'chessAdvice', ok: false, message: '只有管理员可以使用真引擎提示' });
+    return;
+  }
+  client.isAdmin = true;
   if (client.role !== room.chess.turn) {
     send(client.ws, { type: 'chessAdvice', ok: false, message: '还没轮到你，不能请求引擎提示' });
     return;
@@ -204,6 +212,17 @@ async function handleChessEngineAdvice(client, payload) {
     return;
   }
   send(client.ws, { type: 'chessAdvice', ok: true, advice });
+}
+
+function handleAdminLogin(client, payload) {
+  client.isAdmin = accountStore.isAdminPin(payload.pin);
+  send(client.ws, {
+    type: 'adminStatus',
+    ok: client.isAdmin,
+    isAdmin: client.isAdmin,
+    message: client.isAdmin ? '管理员已登录' : '管理员密码不正确'
+  });
+  broadcast(client.room);
 }
 
 function handleChat(client, payload) {
@@ -376,6 +395,7 @@ function handleAdminAdjust(client, payload) {
     return;
   }
   try {
+    if (accountStore.isAdminPin(payload.pin)) client.isAdmin = true;
     const account = accountStore.adjust(target.deviceId, Number(payload.delta || 0), payload.pin);
     target.chips = account.balance;
     target.account = account;
@@ -449,6 +469,7 @@ async function handleMessage(ws, raw) {
     pokerStart: () => handlePokerStart(client, payload),
     pokerAction: () => handlePokerAction(client, payload),
     adminAdjust: () => handleAdminAdjust(client, payload),
+    adminLogin: () => handleAdminLogin(client, payload),
     gomokuPlace: () => handleGomokuPlace(client, payload),
     gomokuReset: () => handleGomokuReset(client)
   };

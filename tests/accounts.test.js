@@ -32,3 +32,12 @@ test('account balances are capped between 0 and 1000 virtual points', () => {
   assert.equal(store.setBalance('phone-a', 1600).balance, 1000);
   assert.equal(store.setBalance('phone-a', -50).balance, 0);
 });
+
+test('admin pin can be checked without changing balances', () => {
+  const store = accounts.createAccountStore({ adminPin: '123456' });
+  store.setBalance('phone-a', 640);
+
+  assert.equal(store.isAdminPin('bad'), false);
+  assert.equal(store.isAdminPin('123456'), true);
+  assert.equal(store.getOrCreate('phone-a').balance, 640);
+});
