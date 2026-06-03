@@ -28,6 +28,21 @@
     elephant: 20,
     soldier: 10
   };
+  const FEN_PIECES = {
+    king: 'k',
+    advisor: 'a',
+    elephant: 'b',
+    horse: 'n',
+    rook: 'r',
+    cannon: 'c',
+    soldier: 'p'
+  };
+  const FILES = 'abcdefghi';
+  const ADVISOR_LEVELS = {
+    amateur: { label: '业余高手', displayDepth: 14, searchDepth: 2, movetime: 800 },
+    city: { label: '市级棋手', displayDepth: 20, searchDepth: 3, movetime: 1500 },
+    top: { label: '软件顶尖', displayDepth: 26, searchDepth: 3, movetime: 3000 }
+  };
 
   let nextId = 1;
 
@@ -334,6 +349,160 @@
     return best;
   }
 
+  function toFen(state) {
+    const rows = state.board.map((row) => {
+      let result = '';
+      let empty = 0;
+      row.forEach((piece) => {
+        if (!piece) {
+          empty += 1;
+          return;
+        }
+        if (empty) {
+          result += String(empty);
+          empty = 0;
+        }
+        const letter = FEN_PIECES[piece.type] || '?';
+        result += piece.color === 'red' ? letter.toUpperCase() : letter;
+      });
+      if (empty) result += String(empty);
+      return result;
+    });
+    return `${rows.join('/')} ${state.turn === 'red' ? 'w' : 'b'} - - 0 1`;
+  }
+
+  function moveToUci(move) {
+    if (!move || !move.from || !move.to) return '';
+    return `${FILES[move.from.x]}${9 - move.from.y}${FILES[move.to.x]}${9 - move.to.y}`;
+  }
+
+  function uciToMove(uci) {
+    if (!/^[a-i][0-9][a-i][0-9]$/.test(uci || '')) return null;
+    return {
+      from: { x: FILES.indexOf(uci[0]), y: 9 - Number(uci[1]) },
+      to: { x: FILES.indexOf(uci[2]), y: 9 - Number(uci[3]) }
+    };
+  }
+
+  function getAdvisorLevel(level) {
+    return ADVISOR_LEVELS[level] || ADVISOR_LEVELS.city;
+  }
+
+  function getCandidateMoves(state, color = state.turn) {
+    if (!state || state.winner) return [];
+    const probe = cloneState(state);
+    probe.turn = color;
+    const moves = [];
+    for (let y = 0; y < HEIGHT; y += 1) {
+      for (let x = 0; x < WIDTH; x += 1) {
+        const piece = probe.board[y][x];
+        if (!piece || piece.color !== color) continue;
+        const from = { x, y };
+        getLegalMoves(probe, from).forEach((to) => {
+          const captured = probe.board[to.y][to.x];
+          if (captured && captured.type === 'king') return;
+          const result = movePiece(probe, from, to);
+          if (result.ok) {
+            moves.push({
+              from,
+              to,
+              captured: captured ? { ...captured } : null,
+              state: result.state
+            });
+          }
+        });
+      }
+    }
+    return moves.sort((a, b) => moveOrderingScore(b) - moveOrderingScore(a));
+  }
+
+  function moveOrderingScore(move) {
+    let score = 0;
+    if (move.captured) score += (PIECE_VALUES[move.captured.type] || 0) * 10;
+    if (move.state.winner) score += 100000;
+    if (move.state.status === 'check') score += 500;
+    return score;
+  }
+
+  function evaluateFor(state, color) {
+    if (state.winner === color) return 1000000;
+    if (state.winner === other(color)) return -1000000;
+    let score = materialScore(state, color) * 100;
+    for (let y = 0; y < HEIGHT; y += 1) {
+      for (let x = 0; x < WIDTH; x += 1) {
+        const piece = state.board[y][x];
+        if (!piece) continue;
+        const signed = piece.color === color ? 1 : -1;
+        score += signed * positionalScore(piece, { x, y }) * 5;
+        if (piece.type === 'soldier') {
+          const progress = piece.color === 'red' ? 9 - y : y;
+          score += signed * progress * 2;
+        }
+      }
+    }
+    if (state.status === 'check') score += state.turn === color ? -250 : 250;
+    return score;
+  }
+
+  function alphaBeta(state, depth, alpha, beta, maximizingColor, deadline) {
+    if (Date.now() >= deadline || depth <= 0 || state.winner) return evaluateFor(state, maximizingColor);
+    const moves = getCandidateMoves(state, state.turn);
+    if (moves.length === 0) return evaluateFor(state, maximizingColor);
+    const maximizing = state.turn === maximizingColor;
+
+    if (maximizing) {
+      let value = -Infinity;
+      for (const move of moves) {
+        value = Math.max(value, alphaBeta(move.state, depth - 1, alpha, beta, maximizingColor, deadline));
+        alpha = Math.max(alpha, value);
+        if (alpha >= beta || Date.now() >= deadline) break;
+      }
+      return value;
+    }
+
+    let value = Infinity;
+    for (const move of moves) {
+      value = Math.min(value, alphaBeta(move.state, depth - 1, alpha, beta, maximizingColor, deadline));
+      beta = Math.min(beta, value);
+      if (alpha >= beta || Date.now() >= deadline) break;
+    }
+    return value;
+  }
+
+  function recommendExpertMove(state, color = state.turn, options = {}) {
+    if (!state || state.winner || color !== state.turn) return null;
+    const levelKey = options.level || 'city';
+    const level = getAdvisorLevel(levelKey);
+    const deadline = Date.now() + Math.max(120, Math.min(level.movetime, options.movetime || level.movetime));
+    const rootMoves = getCandidateMoves(state, color);
+    let best = null;
+
+    rootMoves.forEach((move) => {
+      const score = move.state.winner === color
+        ? 1000000
+        : alphaBeta(move.state, Math.max(0, level.searchDepth - 1), -Infinity, Infinity, color, deadline);
+      const total = score + moveOrderingScore(move);
+      if (!best || total > best.score) {
+        best = {
+          from: move.from,
+          to: move.to,
+          score: total,
+          captured: move.captured,
+          engine: 'local-depth',
+          level: levelKey,
+          levelLabel: level.label,
+          displayDepth: level.displayDepth,
+          searchDepth: level.searchDepth,
+          movetime: level.movetime,
+          fen: toFen(state),
+          uci: moveToUci(move)
+        };
+      }
+    });
+
+    return best || recommendMove(state, color);
+  }
+
   return {
     WIDTH,
     HEIGHT,
@@ -350,6 +519,10 @@
     remainingPieces,
     movePrompt,
     undoLastMove,
-    recommendMove
+    recommendMove,
+    toFen,
+    moveToUci,
+    uciToMove,
+    recommendExpertMove
   };
 });

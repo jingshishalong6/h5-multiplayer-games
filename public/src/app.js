@@ -16,6 +16,10 @@ function getDeviceId() {
 }
 const sideNames = { player: '闲', banker: '庄', tie: '和' };
 
+function getSavedAdviceLevel() {
+  return localStorage.getItem('h5-games-chess-advice-level') || 'city';
+}
+
 let ws = null;
 let model = {
   joined: false,
@@ -26,6 +30,8 @@ let model = {
   selected: null,
   legalMoves: [],
   chessAdvice: null,
+  chessAdviceLevel: getSavedAdviceLevel(),
+  chessAdviceThinking: false,
   error: '',
   chessHint: '',
   dragFrom: null,
@@ -63,6 +69,7 @@ function connect(name, roomCode) {
       model.selected = null;
       model.legalMoves = [];
       model.chessAdvice = null;
+      model.chessAdviceThinking = false;
     }
     if (message.type === 'error') {
       model.error = message.message;
@@ -149,6 +156,10 @@ function tabButton(tab, label) {
   return `<button data-tab="${tab}" class="rounded-md px-4 py-2 ${model.tab === tab ? 'tab-active' : 'text-stone-700'}">${label}</button>`;
 }
 
+function adviceLevelOption(value, label) {
+  return `<option value="${value}" ${model.chessAdviceLevel === value ? 'selected' : ''}>${label}</option>`;
+}
+
 function bindCommon() {
   document.querySelectorAll('[data-tab]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -175,8 +186,13 @@ function renderChess() {
           <h2 class="text-lg font-black">中国象棋</h2>
           <p class="text-sm text-stone-600">${status} · 你是${roleLabel(model.you.role)}</p>
         </div>
-        <div class="flex gap-2">
-          <button data-action="advice" class="rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-bold text-stone-900">提示一步</button>
+        <div class="flex flex-wrap gap-2">
+          <select id="adviceLevel" class="rounded-md border border-amber-300 bg-white px-2 py-2 text-sm font-bold text-stone-900">
+            ${adviceLevelOption('amateur', '业余高手')}
+            ${adviceLevelOption('city', '市级棋手')}
+            ${adviceLevelOption('top', '软件顶尖')}
+          </select>
+          <button data-action="advice" class="rounded-md border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-bold text-stone-900">${model.chessAdviceThinking ? 'AI思考中' : '高手提示'}</button>
           <button data-action="undo" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">悔棋</button>
           <button data-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重置</button>
         </div>
@@ -270,6 +286,16 @@ function bindChess() {
       model.dragFrom = null;
     }
   });
+  const levelSelect = $('#adviceLevel');
+  if (levelSelect) {
+    levelSelect.addEventListener('change', () => {
+      model.chessAdviceLevel = levelSelect.value;
+      localStorage.setItem('h5-games-chess-advice-level', model.chessAdviceLevel);
+      model.chessAdvice = null;
+      model.chessHint = '已切换高手提示档位';
+      render();
+    });
+  }
   document.querySelector('[data-action="advice"]').addEventListener('click', showChessAdvice);
   document.querySelector('[data-action="undo"]').addEventListener('click', () => send({ type: 'undoRequest' }));
   document.querySelector('[data-action="reset"]').addEventListener('click', () => send({ type: 'resetRequest' }));
@@ -286,18 +312,31 @@ function showChessAdvice() {
     render();
     return;
   }
-  const advice = ChessCore.recommendMove(game, model.you.role);
-  if (!advice) {
-    model.chessAdvice = null;
-    model.chessHint = '当前没有找到可走提示';
-    render();
-    return;
-  }
-  model.selected = advice.from;
-  model.legalMoves = [advice.to];
-  model.chessAdvice = advice;
-  model.chessHint = '提示：选中高亮棋子，走到金色圆点位置';
+  model.chessAdvice = null;
+  model.chessAdviceThinking = true;
+  model.chessHint = `${adviceLevelName(model.chessAdviceLevel)}AI思考中...`;
   render();
+  setTimeout(() => {
+    const latest = model.state.chess.state;
+    const advice = ChessCore.recommendExpertMove(latest, model.you.role, { level: model.chessAdviceLevel }) ||
+      ChessCore.recommendMove(latest, model.you.role);
+    model.chessAdviceThinking = false;
+    if (!advice) {
+      model.chessAdvice = null;
+      model.chessHint = '当前没有找到可走提示';
+      render();
+      return;
+    }
+    model.selected = advice.from;
+    model.legalMoves = [advice.to];
+    model.chessAdvice = advice;
+    model.chessHint = `${advice.levelLabel || '高手'}提示：${advice.uci || ''}，选中高亮棋子，走到金色圆点位置`;
+    render();
+  }, 30);
+}
+
+function adviceLevelName(level) {
+  return { amateur: '业余高手', city: '市级棋手', top: '软件顶尖' }[level] || '市级棋手';
 }
 
 function selectPiece(x, y) {

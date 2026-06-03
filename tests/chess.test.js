@@ -42,6 +42,43 @@ test('recommend move prefers capturing a high value piece', () => {
   assert.deepEqual(advice.to, { x: 1, y: 5 });
 });
 
+test('serializes the initial board as xiangqi engine FEN', () => {
+  const state = chess.createInitialState();
+
+  assert.equal(
+    chess.toFen(state),
+    'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1'
+  );
+});
+
+test('converts board moves to and from UCI coordinates', () => {
+  const move = { from: { x: 1, y: 7 }, to: { x: 1, y: 0 } };
+
+  assert.equal(chess.moveToUci(move), 'b2b9');
+  assert.deepEqual(chess.uciToMove('b2b9'), move);
+});
+
+test('expert recommendation returns engine metadata and a legal strong move', () => {
+  const state = chess.createEmptyState('red');
+  state.board[0][3] = chess.makePiece('black', 'king');
+  state.board[9][4] = chess.makePiece('red', 'king');
+  state.board[5][0] = chess.makePiece('red', 'rook');
+  state.board[4][0] = chess.makePiece('black', 'horse');
+  state.board[5][1] = chess.makePiece('black', 'rook');
+
+  const advice = chess.recommendExpertMove(state, 'red', { level: 'city' });
+  const result = chess.movePiece(state, advice.from, advice.to);
+
+  assert.equal(advice.engine, 'local-depth');
+  assert.equal(advice.level, 'city');
+  assert.equal(advice.displayDepth, 20);
+  assert.equal(advice.fen, chess.toFen(state));
+  assert.equal(advice.uci, 'a4b4');
+  assert.deepEqual(advice.from, { x: 0, y: 5 });
+  assert.deepEqual(advice.to, { x: 1, y: 5 });
+  assert.equal(result.ok, true);
+});
+
 test('cannon capture requires exactly one screen piece', () => {
   const state = chess.createInitialState();
 
