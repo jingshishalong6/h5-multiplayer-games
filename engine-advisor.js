@@ -53,7 +53,7 @@ function runUciEngine({ enginePath, engineArgs = [], fen, movetime = DEFAULT_MOV
     let output = '';
     let errorOutput = '';
     let settled = false;
-    const timeout = setTimeout(() => finish(new Error('engine timeout')), timeoutMs || movetime + 3500);
+    const timeout = setTimeout(() => finish(new Error('engine timeout')), timeoutMs || movetime + 12000);
 
     function finish(error, result) {
       if (settled) return;
@@ -80,6 +80,7 @@ function runUciEngine({ enginePath, engineArgs = [], fen, movetime = DEFAULT_MOV
     });
 
     child.stdin.write('uci\n');
+    child.stdin.write('setoption name EvalFile value pikafish.nnue\n');
     child.stdin.write('isready\n');
     child.stdin.write(`position fen ${fen}\n`);
     child.stdin.write(`go movetime ${Math.max(100, Number(movetime || DEFAULT_MOVETIME))}\n`);
