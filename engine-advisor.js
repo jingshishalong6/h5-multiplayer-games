@@ -39,6 +39,11 @@ function runUciEngine({ enginePath, engineArgs = [], fen, movetime = DEFAULT_MOV
       reject(new Error('engine not configured'));
       return;
     }
+    try {
+      fs.chmodSync(enginePath, 0o755);
+    } catch {
+      // If chmod is not supported, spawn will report the real error.
+    }
 
     const child = spawn(enginePath, engineArgs, {
       cwd: path.dirname(enginePath),
