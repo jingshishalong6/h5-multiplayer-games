@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const engineAdvisor = require('../engine-advisor.js');
 const chess = require('../public/src/chess.js');
 
@@ -37,4 +40,16 @@ test('asks an external UCI engine for bestmove when configured', async () => {
   assert.deepEqual(advice.from, { x: 1, y: 7 });
   assert.deepEqual(advice.to, { x: 1, y: 0 });
   assert.equal(advice.fen, chess.toFen(state));
+});
+
+test('resolves engine path from generated setup file when env is empty', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pikafish-path-'));
+  const engineDir = path.join(root, '.engine');
+  fs.mkdirSync(engineDir);
+  fs.writeFileSync(path.join(engineDir, 'pikafish-path.txt'), '/opt/render/project/src/.engine/pikafish');
+
+  assert.equal(
+    engineAdvisor.resolveEnginePath({ root, env: {} }),
+    '/opt/render/project/src/.engine/pikafish'
+  );
 });

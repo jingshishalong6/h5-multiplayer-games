@@ -8,6 +8,9 @@ node_modules/
 !public/**/*.js
 !tests/**/*.js
 !server.js
+!engine-advisor.js
+!scripts/**/*.js
+.engine/
 *.zip
 *.png
 *.jpg

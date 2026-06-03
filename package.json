@@ -6,9 +6,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "setup:pikafish": "node scripts/setup-pikafish.js",
+    "postinstall": "node scripts/setup-pikafish.js"
   },
   "dependencies": {
+    "7zip-bin": "^5.2.0",
     "ws": "^8.17.1"
   },
   "engines": {

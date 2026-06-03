@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const chess = require('./public/src/chess.js');
 
@@ -12,8 +13,18 @@ function parseBestMove(output) {
   return { ...move, uci: match[1].toLowerCase() };
 }
 
+function resolveEnginePath({ root = process.cwd(), env = process.env } = {}) {
+  if (env.PIKAFISH_PATH || env.CHESS_ENGINE_PATH) return env.PIKAFISH_PATH || env.CHESS_ENGINE_PATH;
+  const generatedPathFile = path.join(root, '.engine', 'pikafish-path.txt');
+  try {
+    return fs.readFileSync(generatedPathFile, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
 function defaultEnginePath() {
-  return process.env.PIKAFISH_PATH || process.env.CHESS_ENGINE_PATH || '';
+  return resolveEnginePath();
 }
 
 function configuredEngineArgs() {
@@ -121,6 +132,7 @@ async function getEngineAdvice(state, color = state.turn, options = {}) {
 module.exports = {
   DEFAULT_MOVETIME,
   parseBestMove,
+  resolveEnginePath,
   runUciEngine,
   getEngineAdvice
 };
