@@ -109,6 +109,9 @@ function connect(name = model.lastName, roomCode = model.lastRoomCode, { reconne
       if (model.you) model.you.isAdmin = !!message.isAdmin;
       if (message.ok) model.chessHint = message.message;
     }
+    if (message.type === 'chessVoice') {
+      playChessAnnouncement(message.event);
+    }
     if (message.type === 'chessAdvice') {
       model.chessAdviceThinking = false;
       if (!message.ok || !message.advice) {
@@ -166,10 +169,23 @@ function playChessSound(kind) {
   try {
     unlockSound();
     if (!audioContext || !model.soundUnlocked) return;
-    if (kind === 'capture') {
+    if (kind === 'checkmate') {
+      playTone({ type: 'square', start: 0, duration: 0.11, from: 180, to: 70, volume: 0.25 });
+      playTone({ type: 'sawtooth', start: 0.1, duration: 0.22, from: 110, to: 46, volume: 0.18 });
+      playChessAnnouncement('checkmate');
+      return;
+    }
+    if (kind === 'check') {
+      playTone({ type: 'triangle', start: 0, duration: 0.1, from: 760, to: 980, volume: 0.2 });
+      playTone({ type: 'triangle', start: 0.08, duration: 0.12, from: 980, to: 620, volume: 0.16 });
+      playChessAnnouncement('check');
+      return;
+    }
+    if (kind === 'bigCapture' || kind === 'capture') {
       playTone({ type: 'square', start: 0, duration: 0.07, from: 920, to: 360, volume: 0.24 });
       playTone({ type: 'sawtooth', start: 0.015, duration: 0.18, from: 150, to: 62, volume: 0.18 });
       playTone({ type: 'triangle', start: 0.08, duration: 0.09, from: 680, to: 220, volume: 0.2 });
+      playChessAnnouncement(kind);
       return;
     }
     playTone({ type: 'triangle', start: 0, duration: 0.075, from: 760, to: 420, volume: 0.18 });
@@ -181,6 +197,30 @@ function maybePlayChessMoveSound(chessState) {
   const event = AudioEvents.chessSoundEvent(model.lastChessMoveCount, chessState);
   if (model.joined && event) playChessSound(event);
   model.lastChessMoveCount = chessState?.moveHistory?.length || 0;
+}
+
+function playChessAnnouncement(kind) {
+  const text = {
+    check: '将军',
+    bigCapture: '卧槽，吃',
+    capture: '吃',
+    checkmate: '死棋',
+    resign: '认输'
+  }[kind];
+  if (!text || !('speechSynthesis' in window)) return;
+  try {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 0.95;
+    utterance.pitch = 1.18;
+    utterance.volume = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find((item) => /female|xiaoxiao|huihui|tingting|hanhan|yaoyao|女|普通话|zh/i.test(`${item.name} ${item.lang}`) && /zh|cn|mandarin|普通话/i.test(`${item.name} ${item.lang}`))
+      || voices.find((item) => /zh|cn|mandarin|普通话/i.test(`${item.name} ${item.lang}`));
+    if (voice) utterance.voice = voice;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  } catch {}
 }
 
 function pageShell(content) {
@@ -296,6 +336,7 @@ function renderChess() {
           ${engineControls}
           <button data-action="undo" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">悔棋</button>
           <button data-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重置</button>
+          <button data-action="resign" class="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-bold text-red-800">认输</button>
         </div>
       </div>
       ${notice ? `<div class="chess-notice mb-3" role="status">${escapeHtml(notice)}</div>` : ''}
@@ -408,6 +449,7 @@ function bindChess() {
   if (adviceButton) adviceButton.addEventListener('click', showChessAdvice);
   document.querySelector('[data-action="undo"]').addEventListener('click', () => send({ type: 'undoRequest' }));
   document.querySelector('[data-action="reset"]').addEventListener('click', () => send({ type: 'resetRequest' }));
+  document.querySelector('[data-action="resign"]').addEventListener('click', () => send({ type: 'chessResign' }));
   document.querySelectorAll('[data-response]').forEach((button) => {
     button.addEventListener('click', () => send({ type: button.dataset.response, accept: button.dataset.accept === 'true' }));
   });

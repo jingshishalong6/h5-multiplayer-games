@@ -6,7 +6,12 @@
     const history = chessState?.moveHistory || [];
     if (history.length <= previousMoveCount) return null;
     const latest = history[history.length - 1];
-    return latest?.captured ? 'capture' : 'move';
+    if (chessState?.winner || chessState?.status === 'checkmate') return 'checkmate';
+    if (chessState?.status === 'check') return 'check';
+    if (latest?.captured) {
+      return ['rook', 'cannon', 'horse'].includes(latest.captured.type) ? 'bigCapture' : 'capture';
+    }
+    return 'move';
   }
 
   return {

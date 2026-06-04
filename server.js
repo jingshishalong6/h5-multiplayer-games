@@ -208,10 +208,26 @@ function handleMove(client, payload) {
     return;
   }
   room.chess = result.state;
-  room.chessNotice = chess.movePrompt(room.chess);
+  room.chessNotice = chess.moveNotice(client.name, room.chess);
   room.pendingUndo = null;
   room.pendingReset = null;
   broadcast(room);
+}
+
+function handleChessResign(client) {
+  const room = client.room;
+  if (!['red', 'black'].includes(client.role) || room.chess.winner) return;
+  room.chess = chess.cloneState(room.chess);
+  room.chess.winner = chess.other(client.role);
+  room.chess.status = 'resign';
+  room.chessNotice = `${client.name} 认输，${roleLabelForServer(room.chess.winner)}胜`;
+  systemMessage(room, room.chessNotice);
+  room.clients.forEach((item) => send(item.ws, { type: 'chessVoice', event: 'resign' }));
+  broadcast(room);
+}
+
+function roleLabelForServer(role) {
+  return { red: '红方', black: '黑方' }[role] || role;
 }
 
 async function handleChessEngineAdvice(client, payload) {
@@ -546,6 +562,7 @@ async function handleMessage(ws, raw) {
   const handlers = {
     chat: () => handleChat(client, payload),
     chessMove: () => handleMove(client, payload),
+    chessResign: () => handleChessResign(client),
     chessEngineAdvice: () => handleChessEngineAdvice(client, payload),
     undoRequest: () => handleUndoRequest(client),
     undoResponse: () => handleUndoResponse(client, payload),

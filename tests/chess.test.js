@@ -136,3 +136,11 @@ test('move prompt announces captured piece and whose turn is next', () => {
   assert.equal(result.ok, true);
   assert.equal(chess.movePrompt(result.state), '黑方车从1路2线走到1路6线，吃掉红方马，轮到红方');
 });
+
+test('move notice includes the player name and moved piece', () => {
+  const state = chess.createInitialState();
+  const result = chess.movePiece(state, { x: 0, y: 6 }, { x: 0, y: 5 });
+
+  assert.equal(result.ok, true);
+  assert.equal(chess.moveNotice('阿强', result.state), '最近一步：阿强走了红方兵从1路7线走到1路6线，轮到黑方');
+});

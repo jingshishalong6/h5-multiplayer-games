@@ -297,6 +297,12 @@
     return `${moveText}${action}，轮到${COLOR_NAMES[state.turn]}`;
   }
 
+  function moveNotice(playerName, state) {
+    const prompt = movePrompt(state);
+    const normalizedName = String(playerName || '').trim() || '对手';
+    return `最近一步：${normalizedName}走了${prompt}`;
+  }
+
   function undoLastMove(state) {
     if (!state.moveHistory || state.moveHistory.length === 0) return state;
     const next = cloneState(state);
@@ -521,6 +527,7 @@
     isCheckmate,
     remainingPieces,
     movePrompt,
+    moveNotice,
     undoLastMove,
     recommendMove,
     toFen,

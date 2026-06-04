@@ -16,14 +16,47 @@ test('chess sound event returns move for a non-capturing new move', () => {
   assert.equal(audioEvents.chessSoundEvent(0, state), 'move');
 });
 
-test('chess sound event returns capture for a capturing new move', () => {
+test('chess sound event returns capture for a capturing small piece move', () => {
+  const state = {
+    moveHistory: [
+      { from: { x: 0, y: 1 }, to: { x: 0, y: 5 }, piece: { color: 'black', type: 'rook' }, captured: { color: 'red', type: 'soldier' } }
+    ]
+  };
+
+  assert.equal(audioEvents.chessSoundEvent(0, state), 'capture');
+});
+
+test('chess sound event returns bigCapture for horse cannon and rook captures', () => {
   const state = {
     moveHistory: [
       { from: { x: 0, y: 1 }, to: { x: 0, y: 5 }, piece: { color: 'black', type: 'rook' }, captured: { color: 'red', type: 'horse' } }
     ]
   };
 
-  assert.equal(audioEvents.chessSoundEvent(0, state), 'capture');
+  assert.equal(audioEvents.chessSoundEvent(0, state), 'bigCapture');
+});
+
+test('chess sound event returns check for a checking move', () => {
+  const state = {
+    status: 'check',
+    moveHistory: [
+      { from: { x: 0, y: 1 }, to: { x: 0, y: 5 }, piece: { color: 'black', type: 'rook' }, captured: null }
+    ]
+  };
+
+  assert.equal(audioEvents.chessSoundEvent(0, state), 'check');
+});
+
+test('chess sound event returns checkmate before other move sounds', () => {
+  const state = {
+    winner: 'red',
+    status: 'checkmate',
+    moveHistory: [
+      { from: { x: 4, y: 2 }, to: { x: 4, y: 0 }, piece: { color: 'red', type: 'rook' }, captured: { color: 'black', type: 'advisor' } }
+    ]
+  };
+
+  assert.equal(audioEvents.chessSoundEvent(0, state), 'checkmate');
 });
 
 test('chess sound event ignores already-seen moves', () => {
