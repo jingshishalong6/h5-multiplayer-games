@@ -146,30 +146,41 @@ function unlockSound() {
   }
 }
 
-function playMoveSound() {
+function playTone({ type = 'triangle', start = 0, duration = 0.1, from = 520, to = 240, volume = 0.2 }) {
+  const now = audioContext.currentTime + start;
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(from, now);
+  oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, to), now + duration);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(volume, now + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.start(now);
+  oscillator.stop(now + duration + 0.02);
+}
+
+function playChessSound(kind) {
   try {
     unlockSound();
     if (!audioContext || !model.soundUnlocked) return;
-    const now = audioContext.currentTime;
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = 'triangle';
-    oscillator.frequency.setValueAtTime(520, now);
-    oscillator.frequency.exponentialRampToValueAtTime(240, now + 0.08);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.12);
+    if (kind === 'capture') {
+      playTone({ type: 'square', start: 0, duration: 0.07, from: 920, to: 360, volume: 0.24 });
+      playTone({ type: 'sawtooth', start: 0.015, duration: 0.18, from: 150, to: 62, volume: 0.18 });
+      playTone({ type: 'triangle', start: 0.08, duration: 0.09, from: 680, to: 220, volume: 0.2 });
+      return;
+    }
+    playTone({ type: 'triangle', start: 0, duration: 0.075, from: 760, to: 420, volume: 0.18 });
+    playTone({ type: 'sine', start: 0.055, duration: 0.085, from: 520, to: 260, volume: 0.12 });
   } catch {}
 }
 
 function maybePlayChessMoveSound(chessState) {
-  const count = chessState?.moveHistory?.length || 0;
-  if (count > model.lastChessMoveCount && model.lastChessMoveCount > 0) playMoveSound();
-  model.lastChessMoveCount = count;
+  const event = AudioEvents.chessSoundEvent(model.lastChessMoveCount, chessState);
+  if (model.joined && event) playChessSound(event);
+  model.lastChessMoveCount = chessState?.moveHistory?.length || 0;
 }
 
 function pageShell(content) {
