@@ -89,7 +89,7 @@ function connect(name = model.lastName, roomCode = model.lastRoomCode, { reconne
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'state') {
-      maybePlayChessMoveSound(message.state.chess?.state);
+      maybePlayChessMoveSound(message.state.chess?.state, message.state.chess?.notice);
       model.joined = true;
       model.you = message.you;
       model.state = message.state;
@@ -110,7 +110,7 @@ function connect(name = model.lastName, roomCode = model.lastRoomCode, { reconne
       if (message.ok) model.chessHint = message.message;
     }
     if (message.type === 'chessVoice') {
-      playChessAnnouncement(message.event);
+      playChessAnnouncement(AudioEvents.chessVoiceText(message.event, ''));
     }
     if (message.type === 'chessAdvice') {
       model.chessAdviceThinking = false;
@@ -172,20 +172,17 @@ function playChessSound(kind) {
     if (kind === 'checkmate') {
       playTone({ type: 'square', start: 0, duration: 0.11, from: 180, to: 70, volume: 0.25 });
       playTone({ type: 'sawtooth', start: 0.1, duration: 0.22, from: 110, to: 46, volume: 0.18 });
-      playChessAnnouncement('checkmate');
       return;
     }
     if (kind === 'check') {
       playTone({ type: 'triangle', start: 0, duration: 0.1, from: 760, to: 980, volume: 0.2 });
       playTone({ type: 'triangle', start: 0.08, duration: 0.12, from: 980, to: 620, volume: 0.16 });
-      playChessAnnouncement('check');
       return;
     }
     if (kind === 'bigCapture' || kind === 'capture') {
       playTone({ type: 'square', start: 0, duration: 0.07, from: 920, to: 360, volume: 0.24 });
       playTone({ type: 'sawtooth', start: 0.015, duration: 0.18, from: 150, to: 62, volume: 0.18 });
       playTone({ type: 'triangle', start: 0.08, duration: 0.09, from: 680, to: 220, volume: 0.2 });
-      playChessAnnouncement(kind);
       return;
     }
     playTone({ type: 'triangle', start: 0, duration: 0.075, from: 760, to: 420, volume: 0.18 });
@@ -193,20 +190,16 @@ function playChessSound(kind) {
   } catch {}
 }
 
-function maybePlayChessMoveSound(chessState) {
+function maybePlayChessMoveSound(chessState, notice = '') {
   const event = AudioEvents.chessSoundEvent(model.lastChessMoveCount, chessState);
-  if (model.joined && event) playChessSound(event);
+  if (model.joined && event) {
+    playChessSound(event);
+    playChessAnnouncement(AudioEvents.chessVoiceText(event, notice));
+  }
   model.lastChessMoveCount = chessState?.moveHistory?.length || 0;
 }
 
-function playChessAnnouncement(kind) {
-  const text = {
-    check: '将军',
-    bigCapture: '卧槽，吃',
-    capture: '吃',
-    checkmate: '死棋',
-    resign: '认输'
-  }[kind];
+function playChessAnnouncement(text) {
   if (!text || !('speechSynthesis' in window)) return;
   try {
     const utterance = new SpeechSynthesisUtterance(text);
@@ -221,6 +214,16 @@ function playChessAnnouncement(kind) {
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   } catch {}
+}
+
+function enableVoice() {
+  unlockSound();
+  try {
+    window.speechSynthesis?.getVoices();
+    playChessAnnouncement('语音已开启');
+  } catch {}
+  model.soundUnlocked = true;
+  render();
 }
 
 function pageShell(content) {
@@ -334,6 +337,7 @@ function renderChess() {
         </div>
         <div class="flex flex-wrap gap-2">
           ${engineControls}
+          <button data-action="voice" class="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800">${model.soundUnlocked ? '语音已开启' : '开启语音'}</button>
           <button data-action="undo" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">悔棋</button>
           <button data-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重置</button>
           <button data-action="resign" class="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-bold text-red-800">认输</button>
@@ -447,6 +451,7 @@ function bindChess() {
   }
   const adviceButton = document.querySelector('[data-action="advice"]');
   if (adviceButton) adviceButton.addEventListener('click', showChessAdvice);
+  document.querySelector('[data-action="voice"]').addEventListener('click', enableVoice);
   document.querySelector('[data-action="undo"]').addEventListener('click', () => send({ type: 'undoRequest' }));
   document.querySelector('[data-action="reset"]').addEventListener('click', () => send({ type: 'resetRequest' }));
   document.querySelector('[data-action="resign"]').addEventListener('click', () => send({ type: 'chessResign' }));

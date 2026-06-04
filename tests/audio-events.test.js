@@ -69,3 +69,18 @@ test('chess sound event ignores already-seen moves', () => {
   assert.equal(audioEvents.chessSoundEvent(1, state), null);
 }
 );
+
+test('chess voice text announces every normal move notice', () => {
+  assert.equal(
+    audioEvents.chessVoiceText('move', '最近一步：阿强走了红方兵从1路7线走到1路6线，轮到黑方'),
+    '阿强走了红方兵从1路7线走到1路6线'
+  );
+});
+
+test('chess voice text uses special phrases for tactical events', () => {
+  assert.equal(audioEvents.chessVoiceText('capture', '最近一步：阿强走了红方兵，吃掉黑方卒'), '吃');
+  assert.equal(audioEvents.chessVoiceText('bigCapture', '最近一步：阿强走了红方车，吃掉黑方马'), '卧槽，吃');
+  assert.equal(audioEvents.chessVoiceText('check', '最近一步：阿强走了红方车，黑方被将军'), '将军');
+  assert.equal(audioEvents.chessVoiceText('checkmate', '红方胜，将死'), '死棋');
+  assert.equal(audioEvents.chessVoiceText('resign', ''), '认输');
+});

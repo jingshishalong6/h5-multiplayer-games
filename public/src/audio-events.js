@@ -14,7 +14,24 @@
     return 'move';
   }
 
+  function chessVoiceText(event, notice = '') {
+    const special = {
+      capture: '吃',
+      bigCapture: '卧槽，吃',
+      check: '将军',
+      checkmate: '死棋',
+      resign: '认输'
+    };
+    if (special[event]) return special[event];
+    if (event !== 'move') return '';
+    return String(notice || '')
+      .replace(/^最近一步：/, '')
+      .replace(/，轮到.*$/, '')
+      .trim();
+  }
+
   return {
-    chessSoundEvent
+    chessSoundEvent,
+    chessVoiceText
   };
 });
