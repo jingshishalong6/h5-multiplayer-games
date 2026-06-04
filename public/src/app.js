@@ -15,17 +15,35 @@ function getDeviceId() {
   return id;
 }
 const sideNames = { player: '闲', banker: '庄', tie: '和' };
+const SESSION_KEY = 'h5-games-last-session';
 
 function getSavedAdviceLevel() {
   return localStorage.getItem('h5-games-chess-advice-level') || 'city';
 }
 
+function getSavedSession() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
 let ws = null;
+let reconnectTimer = null;
+let audioContext = null;
+const savedSession = getSavedSession();
 let model = {
   joined: false,
   connected: false,
   you: null,
   state: null,
+  lastName: savedSession.name || '',
+  lastRoomCode: savedSession.roomCode || '',
+  reconnecting: false,
+  manualClose: false,
+  lastChessMoveCount: 0,
+  soundUnlocked: false,
   tab: 'chess',
   selected: null,
   legalMoves: [],
@@ -50,17 +68,28 @@ function send(payload) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
 }
 
-function connect(name, roomCode) {
+function connect(name = model.lastName, roomCode = model.lastRoomCode, { reconnect = false } = {}) {
+  if (!name || !roomCode) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) ws.close();
+  clearTimeout(reconnectTimer);
+  model.lastName = String(name);
+  model.lastRoomCode = String(roomCode);
+  model.reconnecting = reconnect;
+  model.manualClose = false;
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ name: model.lastName, roomCode: model.lastRoomCode }));
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${protocol}//${location.host}`);
-  ws.addEventListener('open', () => {
+  const socket = new WebSocket(`${protocol}//${location.host}`);
+  ws = socket;
+  socket.addEventListener('open', () => {
     model.connected = true;
-    send({ type: 'join', name, roomCode, deviceId: model.deviceId });
+    model.reconnecting = false;
+    send({ type: 'join', name: model.lastName, roomCode: model.lastRoomCode, deviceId: model.deviceId });
     render();
   });
-  ws.addEventListener('message', (event) => {
+  socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'state') {
+      maybePlayChessMoveSound(message.state.chess?.state);
       model.joined = true;
       model.you = message.you;
       model.state = message.state;
@@ -91,11 +120,56 @@ function connect(name, roomCode) {
     }
     render();
   });
-  ws.addEventListener('close', () => {
+  socket.addEventListener('close', () => {
+    if (socket !== ws) return;
     model.connected = false;
-    model.error = '连接已断开，请刷新页面重进房间';
+    if (!model.manualClose && model.lastName && model.lastRoomCode) {
+      model.reconnecting = true;
+      model.error = '连接断开，正在自动重连...';
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => connect(model.lastName, model.lastRoomCode, { reconnect: true }), 1500);
+    } else {
+      model.error = '连接已断开，请重新进入房间';
+    }
     render();
   });
+}
+
+function unlockSound() {
+  if (model.soundUnlocked) return;
+  try {
+    audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+    audioContext.resume?.();
+    model.soundUnlocked = true;
+  } catch {
+    model.soundUnlocked = false;
+  }
+}
+
+function playMoveSound() {
+  try {
+    unlockSound();
+    if (!audioContext || !model.soundUnlocked) return;
+    const now = audioContext.currentTime;
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = 'triangle';
+    oscillator.frequency.setValueAtTime(520, now);
+    oscillator.frequency.exponentialRampToValueAtTime(240, now + 0.08);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.12);
+  } catch {}
+}
+
+function maybePlayChessMoveSound(chessState) {
+  const count = chessState?.moveHistory?.length || 0;
+  if (count > model.lastChessMoveCount && model.lastChessMoveCount > 0) playMoveSound();
+  model.lastChessMoveCount = count;
 }
 
 function pageShell(content) {
@@ -126,10 +200,10 @@ function render() {
         </div>
         <form id="joinForm" class="space-y-4">
           <label class="block text-sm font-semibold">昵称
-            <input name="name" class="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-3 outline-none focus:border-red-700" placeholder="例如：阿强" required />
+            <input name="name" class="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-3 outline-none focus:border-red-700" placeholder="例如：阿强" value="${escapeHtml(model.lastName)}" required />
           </label>
           <label class="block text-sm font-semibold">房间号
-            <input name="room" class="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-3 outline-none focus:border-red-700" placeholder="例如：8888" required />
+            <input name="room" class="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-3 outline-none focus:border-red-700" placeholder="例如：8888" value="${escapeHtml(model.lastRoomCode)}" required />
           </label>
           <button class="w-full rounded-md bg-stone-900 px-4 py-3 font-bold text-white" type="submit">${model.connected ? '进入中...' : '进入房间'}</button>
         </form>
@@ -254,6 +328,13 @@ function renderBoard(game) {
     return `<button class="dot" data-to-x="${pos.x}" data-to-y="${pos.y}" style="left:${posX(view.x)}%;top:${posY(view.y)}%"></button>`;
   });
   const adviceMarkers = [];
+  const lastMove = game.moveHistory?.[game.moveHistory.length - 1];
+  if (lastMove) {
+    const from = BoardView.toView(lastMove.from, viewRole);
+    const to = BoardView.toView(lastMove.to, viewRole);
+    adviceMarkers.push(`<span class="last-move-marker last-from" style="left:${posX(from.x)}%;top:${posY(from.y)}%"></span>`);
+    adviceMarkers.push(`<span class="last-move-marker last-to" style="left:${posX(to.x)}%;top:${posY(to.y)}%"></span>`);
+  }
   if (model.chessAdvice) {
     const from = BoardView.toView(model.chessAdvice.from, viewRole);
     const to = BoardView.toView(model.chessAdvice.to, viewRole);
@@ -548,13 +629,20 @@ function bindCasino() {
 
 function renderPoker() {
   const table = model.state.poker;
+  const realPlayerCount = (model.state.users || []).length;
+  const pureFriendDisabled = realPlayerCount < 2;
+  const pureFriendAttrs = pureFriendDisabled ? 'disabled title="等第二个人进房间后可开纯好友局"' : '';
+  const pureFriendClass = pureFriendDisabled ? 'opacity-50' : '';
   if (!table) {
     return `
       <section class="poker-table rounded-lg p-4">
         <div class="poker-felt-inner">
           <h2 class="text-xl font-black text-white">德州扑克好友桌</h2>
-          <p class="mt-2 text-sm text-emerald-100">一个人可与机器人练习，两个人进入同房间也能一起玩。只使用虚拟分。</p>
-          <button id="pokerStart" class="mt-5 rounded-md bg-amber-300 px-5 py-3 font-black text-stone-900">开始德州</button>
+          <p class="mt-2 text-sm text-emerald-100">两个人进同一房间可开纯好友局，一个人也可以加机器人练习。只使用虚拟分。</p>
+          <div class="mt-5 flex flex-wrap gap-2">
+            <button data-poker-start data-bot-count="0" ${pureFriendAttrs} class="rounded-md bg-amber-300 px-5 py-3 font-black text-stone-900 ${pureFriendClass}">纯好友局</button>
+            <button data-poker-start data-bot-count="5" class="rounded-md border border-emerald-200 bg-emerald-900/70 px-5 py-3 font-black text-white">加机器人</button>
+          </div>
         </div>
       </section>
     `;
@@ -570,7 +658,10 @@ function renderPoker() {
             <h2 class="text-xl font-black">德州扑克</h2>
             <p class="text-sm text-emerald-100">${pokerStageName(table.stage)} · 底池 ${table.pot} · 当前行动：${active ? escapeHtml(active.name) : '无'}</p>
           </div>
-          <button id="pokerStart" class="rounded-md bg-amber-300 px-4 py-2 font-black text-stone-900">新一局</button>
+          <div class="flex flex-wrap gap-2">
+            <button data-poker-start data-bot-count="0" ${pureFriendAttrs} class="rounded-md bg-amber-300 px-4 py-2 font-black text-stone-900 ${pureFriendClass}">纯好友局</button>
+            <button data-poker-start data-bot-count="5" class="rounded-md border border-emerald-200 bg-emerald-900/70 px-4 py-2 font-black text-white">加机器人</button>
+          </div>
         </div>
         <div class="poker-community">${renderPokerCards(table.community)}</div>
         <div class="poker-seats">${table.seats.map(renderPokerSeat).join('')}</div>
@@ -629,7 +720,9 @@ function renderPokerResult(result) {
 }
 
 function bindPoker() {
-  $('#pokerStart')?.addEventListener('click', () => send({ type: 'pokerStart', botCount: 5 }));
+  document.querySelectorAll('[data-poker-start]').forEach((button) => {
+    button.addEventListener('click', () => send({ type: 'pokerStart', botCount: Number(button.dataset.botCount) }));
+  });
   document.querySelectorAll('[data-poker-action]').forEach((button) => {
     button.addEventListener('click', () => {
       const action = button.dataset.pokerAction;
@@ -644,7 +737,8 @@ function renderGomoku() {
   const black = users[0];
   const white = users[1];
   const myColor = model.you.id === black?.id ? 'black' : model.you.id === white?.id ? 'white' : 'spectator';
-  const status = game.winner ? `${gomokuColorName(game.winner)}胜利` : `轮到${gomokuColorName(game.turn)}`;
+  const status = game.winner ? `${gomokuColorName(game.winner)}胜利` : game.draw ? '和棋' : `轮到${gomokuColorName(game.turn)}`;
+  const helper = myColor === 'spectator' ? '你正在观战' : game.winner || game.draw ? '本局已结束，可申请重开' : myColor === game.turn ? '轮到你落子' : '等待对方落子';
   return `
     <section class="paper-panel rounded-lg p-3 sm:p-4">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -653,10 +747,31 @@ function renderGomoku() {
           <p class="text-sm text-stone-600">${status} · 你是${myColor === 'spectator' ? '观战' : gomokuColorName(myColor)}</p>
           <p class="text-xs text-stone-500">黑棋：${escapeHtml(black?.name || '等待')} · 白棋：${escapeHtml(white?.name || '等待')}</p>
         </div>
-        <button id="gomokuReset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重开</button>
+        <div class="flex flex-wrap gap-2">
+          <button data-gomoku-action="undo" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">悔一步</button>
+          <button data-gomoku-action="reset" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">重开</button>
+        </div>
       </div>
+      ${renderGomokuPending(game, myColor)}
+      <div class="mb-3 rounded-md bg-white/70 px-3 py-2 text-sm text-stone-700">${escapeHtml(helper)}</div>
       <div class="flex justify-center">${renderGomokuBoard(game, myColor)}</div>
     </section>
+  `;
+}
+
+function renderGomokuPending(game, myColor) {
+  const pendingUndo = game.pendingUndo;
+  const pendingReset = game.pendingReset;
+  const pending = pendingUndo || pendingReset;
+  if (!pending || pending.from === myColor) return '';
+  const type = pendingUndo ? '悔棋' : '重开';
+  const response = pendingUndo ? 'gomokuUndoResponse' : 'gomokuResetResponse';
+  return `
+    <div class="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm">
+      ${escapeHtml(pending.name)} 申请五子棋${type}
+      <button data-gomoku-response="${response}" data-accept="true" class="ml-2 rounded bg-stone-900 px-2 py-1 text-white">同意</button>
+      <button data-gomoku-response="${response}" data-accept="false" class="ml-1 rounded border border-stone-300 bg-white px-2 py-1">拒绝</button>
+    </div>
   `;
 }
 
@@ -677,9 +792,16 @@ function renderGomokuBoard(game, myColor) {
 }
 
 function bindGomoku() {
-  $('#gomokuReset')?.addEventListener('click', () => send({ type: 'gomokuReset' }));
+  document.querySelector('[data-gomoku-action="undo"]')?.addEventListener('click', () => send({ type: 'gomokuUndoRequest' }));
+  document.querySelector('[data-gomoku-action="reset"]')?.addEventListener('click', () => send({ type: 'gomokuResetRequest' }));
+  document.querySelectorAll('[data-gomoku-response]').forEach((button) => {
+    button.addEventListener('click', () => send({ type: button.dataset.gomokuResponse, accept: button.dataset.accept === 'true' }));
+  });
   document.querySelectorAll('.gomoku-point').forEach((button) => {
     button.addEventListener('click', () => {
+      const game = model.state.gomoku;
+      const myColor = document.querySelector('.gomoku-board')?.dataset.myColor;
+      if (myColor !== game.turn || game.winner || game.draw) return;
       send({ type: 'gomokuPlace', x: Number(button.dataset.x), y: Number(button.dataset.y) });
     });
   });
@@ -778,5 +900,7 @@ function bindAdminPanel() {
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
+
+document.addEventListener('pointerdown', unlockSound, { once: true });
 
 render();

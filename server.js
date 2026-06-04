@@ -21,6 +21,7 @@ const MIME = {
 
 const rooms = new Map();
 const accountStore = accounts.createAccountStore({ adminPin: process.env.ADMIN_PIN || '1234' });
+const EMPTY_ROOM_TTL_MS = 30 * 60 * 1000;
 
 function send(ws, message) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
@@ -38,6 +39,7 @@ function createRoom(code) {
   return {
     code,
     clients: new Map(),
+    seatOrder: [],
     chess: chess.createInitialState(),
     chessNotice: null,
     pendingUndo: null,
@@ -48,19 +50,32 @@ function createRoom(code) {
     baccarat: { betsOpen: true, bets: {}, lastRound: null },
     poker: null,
     pokerBotCount: 5,
-    gomoku: gomoku.createInitialState()
+    gomoku: gomoku.createInitialState(),
+    gomokuPendingUndo: null,
+    gomokuPendingReset: null
   };
 }
 
 function getRoom(code) {
   const key = normalizeRoomCode(code);
   if (!rooms.has(key)) rooms.set(key, createRoom(key));
-  return rooms.get(key);
+  const room = rooms.get(key);
+  if (room.emptyTimer) {
+    clearTimeout(room.emptyTimer);
+    room.emptyTimer = null;
+  }
+  return room;
 }
 
 function assignSeats(room) {
   const clients = [...room.clients.values()].sort((a, b) => a.joinedAt - b.joinedAt);
-  clients.forEach((client, index) => {
+  clients.forEach((client) => {
+    if (room.seatOrder.includes(client.deviceId)) return;
+    const openSeat = [0, 1].find((index) => !room.seatOrder[index]);
+    if (typeof openSeat === 'number') room.seatOrder[openSeat] = client.deviceId;
+  });
+  clients.forEach((client) => {
+    const index = room.seatOrder.indexOf(client.deviceId);
     client.role = index === 0 ? 'red' : index === 1 ? 'black' : 'spectator';
   });
 }
@@ -95,7 +110,11 @@ function publicState(room, viewerId) {
     lastSlot: room.lastSlot,
     baccarat: room.baccarat,
     poker: poker.publicHoldemState(room.poker, viewerId),
-    gomoku: room.gomoku
+    gomoku: {
+      ...room.gomoku,
+      pendingUndo: room.gomokuPendingUndo,
+      pendingReset: room.gomokuPendingReset
+    }
   };
 }
 
@@ -142,6 +161,12 @@ function handleJoin(ws, payload) {
   const room = getRoom(payload.roomCode);
   const deviceId = String(payload.deviceId || `guest-${Math.random().toString(36).slice(2)}`).slice(0, 80);
   const account = accountStore.getOrCreate(deviceId, normalizeName(payload.name));
+  room.clients.forEach((existing) => {
+    if (existing.deviceId === deviceId && existing.ws !== ws) {
+      room.clients.delete(existing.id);
+      try { existing.ws.close(); } catch {}
+    }
+  });
   const client = {
     id: Math.random().toString(36).slice(2, 10),
     deviceId,
@@ -363,9 +388,12 @@ function syncPokerBalances(room) {
 
 function handlePokerStart(client, payload) {
   const room = client.room;
-  room.pokerBotCount = Math.max(0, Math.min(5, Number(payload.botCount ?? room.pokerBotCount ?? 5)));
+  const realPlayers = roomPokerPlayers(room);
+  const requestedBotCount = payload.botCount ?? poker.defaultBotCount(realPlayers.length);
+  const safeBotCount = realPlayers.length < 2 && Number(requestedBotCount) === 0 ? poker.defaultBotCount(realPlayers.length) : requestedBotCount;
+  room.pokerBotCount = Math.max(0, Math.min(5, Number(safeBotCount)));
   room.poker = poker.createHoldemTable({
-    players: roomPokerPlayers(room),
+    players: realPlayers,
     botCount: room.pokerBotCount,
     smallBlind: 5,
     bigBlind: 10
@@ -430,12 +458,72 @@ function handleGomokuPlace(client, payload) {
     return;
   }
   room.gomoku = result.state;
+  room.gomokuPendingUndo = null;
+  room.gomokuPendingReset = null;
   broadcast(room);
 }
 
-function handleGomokuReset(client) {
-  client.room.gomoku = gomoku.createInitialState();
-  broadcast(client.room);
+function hasGomokuOpponent(room, client) {
+  const color = gomokuColorForClient(room, client);
+  return [...room.clients.values()].some((item) => item.id !== client.id && gomokuColorForClient(room, item) !== 'spectator' && gomokuColorForClient(room, item) !== color);
+}
+
+function handleGomokuUndoRequest(client) {
+  const room = client.room;
+  const color = gomokuColorForClient(room, client);
+  if (!['black', 'white'].includes(color)) return;
+  if (!room.gomoku.moves.length) {
+    send(client.ws, { type: 'error', message: '现在还没有可悔的棋' });
+    return;
+  }
+  if (!hasGomokuOpponent(room, client)) {
+    room.gomoku = gomoku.undoLastMove(room.gomoku);
+    broadcast(room);
+    return;
+  }
+  room.gomokuPendingUndo = { from: color, name: client.name };
+  systemMessage(room, `${client.name} 申请五子棋悔棋`);
+}
+
+function handleGomokuUndoResponse(client, payload) {
+  const room = client.room;
+  const color = gomokuColorForClient(room, client);
+  if (!room.gomokuPendingUndo || room.gomokuPendingUndo.from === color) return;
+  if (payload.accept) {
+    room.gomoku = gomoku.undoLastMove(room.gomoku);
+    systemMessage(room, `${client.name} 同意五子棋悔棋`);
+  } else {
+    systemMessage(room, `${client.name} 拒绝五子棋悔棋`);
+  }
+  room.gomokuPendingUndo = null;
+  broadcast(room);
+}
+
+function handleGomokuResetRequest(client) {
+  const room = client.room;
+  const color = gomokuColorForClient(room, client);
+  if (!['black', 'white'].includes(color)) return;
+  if (!hasGomokuOpponent(room, client)) {
+    room.gomoku = gomoku.createInitialState();
+    broadcast(room);
+    return;
+  }
+  room.gomokuPendingReset = { from: color, name: client.name };
+  systemMessage(room, `${client.name} 申请重开五子棋`);
+}
+
+function handleGomokuResetResponse(client, payload) {
+  const room = client.room;
+  const color = gomokuColorForClient(room, client);
+  if (!room.gomokuPendingReset || room.gomokuPendingReset.from === color) return;
+  if (payload.accept) {
+    room.gomoku = gomoku.createInitialState();
+    systemMessage(room, `${client.name} 同意重开五子棋`);
+  } else {
+    systemMessage(room, `${client.name} 拒绝重开五子棋`);
+  }
+  room.gomokuPendingReset = null;
+  broadcast(room);
 }
 
 async function handleMessage(ws, raw) {
@@ -471,7 +559,10 @@ async function handleMessage(ws, raw) {
     adminAdjust: () => handleAdminAdjust(client, payload),
     adminLogin: () => handleAdminLogin(client, payload),
     gomokuPlace: () => handleGomokuPlace(client, payload),
-    gomokuReset: () => handleGomokuReset(client)
+    gomokuUndoRequest: () => handleGomokuUndoRequest(client),
+    gomokuUndoResponse: () => handleGomokuUndoResponse(client, payload),
+    gomokuResetRequest: () => handleGomokuResetRequest(client),
+    gomokuResetResponse: () => handleGomokuResetResponse(client, payload)
   };
   if (handlers[payload.type]) await handlers[payload.type]();
 }
@@ -482,8 +573,11 @@ function removeClient(ws) {
   const room = client.room;
   room.clients.delete(client.id);
   assignSeats(room);
-  if (room.clients.size === 0) rooms.delete(room.code);
-  else systemMessage(room, `${client.name} 离开房间`);
+  if (room.clients.size === 0) {
+    room.emptyTimer = setTimeout(() => {
+      if (room.clients.size === 0) rooms.delete(room.code);
+    }, EMPTY_ROOM_TTL_MS);
+  } else systemMessage(room, `${client.name} 离开房间`);
 }
 
 const server = http.createServer((req, res) => {

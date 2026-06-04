@@ -19,6 +19,7 @@
       size: SIZE,
       turn: 'black',
       winner: null,
+      draw: false,
       lastMove: null,
       moves: [],
       board: Array.from({ length: SIZE }, () => Array(SIZE).fill(null))
@@ -30,6 +31,7 @@
       size: state.size || SIZE,
       turn: state.turn,
       winner: state.winner || null,
+      draw: Boolean(state.draw),
       lastMove: state.lastMove ? { ...state.lastMove } : null,
       moves: (state.moves || []).map((move) => ({ ...move })),
       board: state.board.map((row) => row.slice())
@@ -63,9 +65,13 @@
     return DIRECTIONS.some(([dx, dy]) => countLine(board, x, y, color, dx, dy) >= 5);
   }
 
+  function isBoardFull(board) {
+    return board.every((row) => row.every(Boolean));
+  }
+
   function placeStone(state, x, y, color = state.turn) {
     if (!inBounds(x, y)) return { ok: false, reason: 'out of bounds' };
-    if (state.winner) return { ok: false, reason: 'game over' };
+    if (state.winner || state.draw) return { ok: false, reason: 'game over' };
     if (color !== state.turn) return { ok: false, reason: 'not your turn' };
     if (state.board[y][x]) return { ok: false, reason: 'occupied' };
     const next = cloneState(state);
@@ -73,8 +79,21 @@
     next.lastMove = { x, y, color };
     next.moves.push(next.lastMove);
     if (hasFive(next.board, x, y, color)) next.winner = color;
+    else if (isBoardFull(next.board)) next.draw = true;
     else next.turn = other(color);
     return { ok: true, state: next };
+  }
+
+  function undoLastMove(state) {
+    const next = cloneState(state);
+    const latest = next.moves.pop();
+    if (!latest) return next;
+    next.board[latest.y][latest.x] = null;
+    next.turn = latest.color;
+    next.winner = null;
+    next.draw = false;
+    next.lastMove = next.moves[next.moves.length - 1] || null;
+    return next;
   }
 
   return {
@@ -82,7 +101,9 @@
     createInitialState,
     cloneState,
     placeStone,
+    undoLastMove,
     hasFive,
+    isBoardFull,
     other
   };
 });

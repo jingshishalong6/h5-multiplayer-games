@@ -287,11 +287,14 @@
   function movePrompt(state) {
     const mover = other(state.turn);
     const lastMove = state.moveHistory[state.moveHistory.length - 1];
+    if (!lastMove) return `轮到${COLOR_NAMES[state.turn]}`;
+    const pieceName = PIECE_NAMES[lastMove.piece.color][lastMove.piece.type];
+    const moveText = `${COLOR_NAMES[mover]}${pieceName}从${lastMove.from.x + 1}路${lastMove.from.y + 1}线走到${lastMove.to.x + 1}路${lastMove.to.y + 1}线`;
     const captured = lastMove && lastMove.captured;
-    const action = captured ? `吃掉${COLOR_NAMES[captured.color]}${PIECE_NAMES[captured.color][captured.type]}` : '走完';
+    const action = captured ? `，吃掉${COLOR_NAMES[captured.color]}${PIECE_NAMES[captured.color][captured.type]}` : '';
     if (state.winner) return `${COLOR_NAMES[state.winner]}胜，将死`;
-    if (state.status === 'check') return `${COLOR_NAMES[mover]}${action}，${COLOR_NAMES[state.turn]}被将军`;
-    return `${COLOR_NAMES[mover]}${action}，轮到${COLOR_NAMES[state.turn]}`;
+    if (state.status === 'check') return `${moveText}${action}，${COLOR_NAMES[state.turn]}被将军`;
+    return `${moveText}${action}，轮到${COLOR_NAMES[state.turn]}`;
   }
 
   function undoLastMove(state) {

@@ -116,12 +116,12 @@ test('checkmate is detected when the checked king has no escape', () => {
   assert.equal(chess.isCheckmate(state, 'black'), true);
 });
 
-test('move prompt announces the side that moved and whose turn is next', () => {
+test('move prompt announces the moved piece and coordinates', () => {
   const state = chess.createInitialState();
   const result = chess.movePiece(state, { x: 0, y: 6 }, { x: 0, y: 5 });
 
   assert.equal(result.ok, true);
-  assert.equal(chess.movePrompt(result.state), '红方走完，轮到黑方');
+  assert.equal(chess.movePrompt(result.state), '红方兵从1路7线走到1路6线，轮到黑方');
 });
 
 test('move prompt announces captured piece and whose turn is next', () => {
@@ -134,5 +134,5 @@ test('move prompt announces captured piece and whose turn is next', () => {
   const result = chess.movePiece(state, { x: 0, y: 1 }, { x: 0, y: 5 });
 
   assert.equal(result.ok, true);
-  assert.equal(chess.movePrompt(result.state), '黑方吃掉红方马，轮到红方');
+  assert.equal(chess.movePrompt(result.state), '黑方车从1路2线走到1路6线，吃掉红方马，轮到红方');
 });

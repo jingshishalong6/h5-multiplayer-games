@@ -46,3 +46,38 @@ test('reset creates a fresh gomoku state', () => {
   assert.equal(reset.board[7][7], null);
   assert.equal(reset.turn, 'black');
 });
+
+test('undo removes the latest gomoku move and restores the turn', () => {
+  let state = gomoku.createInitialState();
+  state = gomoku.placeStone(state, 7, 7, 'black').state;
+  state = gomoku.placeStone(state, 8, 7, 'white').state;
+
+  const undone = gomoku.undoLastMove(state);
+
+  assert.equal(undone.board[7][8], null);
+  assert.equal(undone.board[7][7], 'black');
+  assert.equal(undone.turn, 'white');
+  assert.equal(undone.moves.length, 1);
+  assert.equal(undone.lastMove.x, 7);
+});
+
+test('full gomoku board without five in a row is a draw', () => {
+  const state = gomoku.createInitialState();
+  state.board = Array.from({ length: gomoku.SIZE }, (_, y) => (
+    Array.from({ length: gomoku.SIZE }, (_, x) => (x === 14 && y === 14 ? null : ((x + 2 * y) % 5 < 2 ? 'black' : 'white')))
+  ));
+  state.moves = [];
+  for (let y = 0; y < gomoku.SIZE; y += 1) {
+    for (let x = 0; x < gomoku.SIZE; x += 1) {
+      if (state.board[y][x]) state.moves.push({ x, y, color: state.board[y][x] });
+    }
+  }
+  state.turn = 'white';
+  state.lastMove = state.moves[state.moves.length - 1];
+
+  const result = gomoku.placeStone(state, 14, 14, 'white');
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state.winner, null);
+  assert.equal(result.state.draw, true);
+});

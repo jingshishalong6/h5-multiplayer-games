@@ -23,6 +23,12 @@ test('new holdem table keeps a real player zero balance instead of refreshing to
   assert.equal(table.seats[0].chips, 0);
 });
 
+test('default holdem bot count uses pure friend table once two real players joined', () => {
+  assert.equal(poker.defaultBotCount(1), 5);
+  assert.equal(poker.defaultBotCount(2), 0);
+  assert.equal(poker.defaultBotCount(6), 0);
+});
+
 test('evaluates ace-low wheel straight', () => {
   const hand = poker.evaluateBestHand([c(14), c(2, 'h'), c(3, 'd'), c(4, 'c'), c(5, 's'), c(9, 'h'), c(11, 'd')]);
 

@@ -136,6 +136,10 @@
     return JSON.parse(JSON.stringify(table));
   }
 
+  function defaultBotCount(realPlayerCount) {
+    return Number(realPlayerCount || 0) >= 2 ? 0 : 5;
+  }
+
   function createHoldemTable({ players = [], botCount = 5, smallBlind = 5, bigBlind = 10, random = Math.random } = {}) {
     const realSeats = players.slice(0, 6).map((player, index) => ({
       id: player.id,
@@ -411,6 +415,7 @@
     cardLabel,
     evaluateBestHand,
     compareHands,
+    defaultBotCount,
     createHoldemTable,
     startHand,
     applyAction,
