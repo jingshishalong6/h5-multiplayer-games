@@ -38,6 +38,58 @@
     soldier: 'p'
   };
   const FILES = 'abcdefghi';
+  const ENDGAMES = [
+    {
+      id: 'rook-cannon-attack',
+      name: '车炮攻将',
+      description: '红方车炮压制，练习连续将军和卡位。',
+      turn: 'red',
+      pieces: [
+        ['black', 'king', 4, 0], ['black', 'advisor', 3, 0], ['black', 'advisor', 5, 0], ['black', 'elephant', 2, 0], ['black', 'elephant', 6, 0],
+        ['red', 'king', 4, 9], ['red', 'rook', 4, 5], ['red', 'cannon', 1, 2], ['red', 'horse', 7, 6]
+      ]
+    },
+    {
+      id: 'horse-cannon-mate',
+      name: '马后炮',
+      description: '红方马炮配合，练习借子控将。',
+      turn: 'red',
+      pieces: [
+        ['black', 'king', 4, 0], ['black', 'advisor', 3, 0], ['black', 'rook', 4, 3],
+        ['red', 'king', 4, 9], ['red', 'horse', 3, 2], ['red', 'cannon', 4, 5], ['red', 'rook', 8, 8]
+      ]
+    },
+    {
+      id: 'single-rook-endgame',
+      name: '单车残局',
+      description: '红方单车攻守，练习控线和逼宫。',
+      turn: 'red',
+      pieces: [
+        ['black', 'king', 4, 0], ['black', 'advisor', 3, 0], ['black', 'advisor', 5, 0], ['black', 'elephant', 2, 2], ['black', 'elephant', 6, 2],
+        ['red', 'king', 4, 9], ['red', 'rook', 4, 6], ['red', 'soldier', 3, 5]
+      ]
+    },
+    {
+      id: 'cannon-screen-attack',
+      name: '炮架攻杀',
+      description: '练习炮需要炮架才能吃子的残局节奏。',
+      turn: 'red',
+      pieces: [
+        ['black', 'king', 4, 0], ['black', 'advisor', 5, 0], ['black', 'horse', 4, 2],
+        ['red', 'king', 4, 9], ['red', 'cannon', 4, 6], ['red', 'soldier', 4, 4], ['red', 'rook', 0, 7]
+      ]
+    },
+    {
+      id: 'soldier-cross-river',
+      name: '过河兵',
+      description: '红方兵已过河，练习小子逼将。',
+      turn: 'red',
+      pieces: [
+        ['black', 'king', 4, 0], ['black', 'advisor', 3, 0], ['black', 'elephant', 6, 2],
+        ['red', 'king', 4, 9], ['red', 'soldier', 4, 5], ['red', 'soldier', 5, 4], ['red', 'horse', 2, 6]
+      ]
+    }
+  ];
   const ADVISOR_LEVELS = {
     amateur: { label: '业余高手', displayDepth: 14, searchDepth: 2, movetime: 800 },
     city: { label: '市级棋手', displayDepth: 20, searchDepth: 3, movetime: 1500 },
@@ -55,13 +107,17 @@
   }
 
   function cloneState(state) {
-    return {
+    const next = {
       turn: state.turn,
       winner: state.winner || null,
       status: state.status || '',
       moveHistory: (state.moveHistory || []).map((item) => JSON.parse(JSON.stringify(item))),
       board: state.board.map((row) => row.map((piece) => (piece ? { ...piece } : null)))
     };
+    ['mode', 'humanColor', 'aiColor', 'endgameId', 'endgameName'].forEach((key) => {
+      if (state[key]) next[key] = state[key];
+    });
+    return next;
   }
 
   function createEmptyState(turn = 'red') {
@@ -69,6 +125,7 @@
       turn,
       winner: null,
       status: '',
+      mode: 'standard',
       moveHistory: [],
       board: Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(null))
     };
@@ -91,6 +148,63 @@
       b[6][x] = makePiece('red', 'soldier');
     });
     return state;
+  }
+
+  function listEndgames() {
+    return ENDGAMES.map(({ id, name, description }) => ({ id, name, description }));
+  }
+
+  function getEndgame(id) {
+    return ENDGAMES.find((item) => item.id === id) || ENDGAMES[0];
+  }
+
+  function createEndgameState(id = ENDGAMES[0].id, options = {}) {
+    const preset = getEndgame(id);
+    const humanColor = options.humanColor || 'red';
+    const state = createEmptyState(preset.turn || 'red');
+    preset.pieces.forEach(([color, type, x, y]) => {
+      state.board[y][x] = makePiece(color, type);
+    });
+    state.mode = options.mode || 'endgame-ai';
+    state.humanColor = humanColor;
+    state.aiColor = options.aiColor || other(humanColor);
+    state.endgameId = preset.id;
+    state.endgameName = preset.name;
+    return state;
+  }
+
+  function createHumanVsAiState(options = {}) {
+    const humanColor = options.humanColor || 'red';
+    if (options.endgameId) {
+      return createEndgameState(options.endgameId, {
+        mode: 'endgame-ai',
+        humanColor,
+        aiColor: other(humanColor)
+      });
+    }
+    const state = createInitialState();
+    state.mode = 'ai';
+    state.humanColor = humanColor;
+    state.aiColor = other(humanColor);
+    return state;
+  }
+
+  function isAiMode(state) {
+    return state?.mode === 'ai' || state?.mode === 'endgame-ai';
+  }
+
+  function resetModeState(state) {
+    if (state?.mode === 'endgame-ai') {
+      return createEndgameState(state.endgameId, {
+        mode: 'endgame-ai',
+        humanColor: state.humanColor || 'red',
+        aiColor: state.aiColor || 'black'
+      });
+    }
+    if (state?.mode === 'ai') {
+      return createHumanVsAiState({ humanColor: state.humanColor || 'red' });
+    }
+    return createInitialState();
   }
 
   function inBounds(pos) {
@@ -520,6 +634,11 @@
     makePiece,
     createEmptyState,
     createInitialState,
+    listEndgames,
+    createEndgameState,
+    createHumanVsAiState,
+    isAiMode,
+    resetModeState,
     cloneState,
     movePiece,
     getLegalMoves,

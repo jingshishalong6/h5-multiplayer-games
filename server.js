@@ -196,9 +196,42 @@ function requireClient(ws) {
   return ws.clientInfo;
 }
 
-function handleMove(client, payload) {
+function canClientMoveChess(client) {
+  const game = client.room.chess;
+  if (chess.isAiMode(game)) return client.role === game.humanColor && game.turn === game.humanColor;
+  return client.role === game.turn;
+}
+
+function roomHasAdmin(room) {
+  return [...room.clients.values()].some((client) => client.isAdmin);
+}
+
+async function playChessAiIfNeeded(room) {
+  const game = room.chess;
+  if (!chess.isAiMode(game) || game.winner || game.turn !== game.aiColor) return;
+  const state = chess.cloneState(game);
+  let advice = null;
+  if (roomHasAdmin(room)) {
+    advice = await engineAdvisor.getEngineAdvice(state, game.aiColor, {
+      movetime: 1200,
+      fallback: () => chess.recommendExpertMove(state, game.aiColor, { level: 'city', movetime: 900 })
+    });
+  } else {
+    advice = chess.recommendExpertMove(state, game.aiColor, { level: 'city', movetime: 700 });
+  }
+  if (!advice) return;
+  const result = chess.movePiece(room.chess, advice.from, advice.to);
+  if (!result.ok) return;
+  room.chess = result.state;
+  room.chessNotice = chess.moveNotice('AI', room.chess);
+  room.pendingUndo = null;
+  room.pendingReset = null;
+  broadcast(room);
+}
+
+async function handleMove(client, payload) {
   const room = client.room;
-  if (client.role !== room.chess.turn) {
+  if (!canClientMoveChess(client)) {
     send(client.ws, { type: 'error', message: '还没轮到你落子' });
     return;
   }
@@ -212,6 +245,31 @@ function handleMove(client, payload) {
   room.pendingUndo = null;
   room.pendingReset = null;
   broadcast(room);
+  await playChessAiIfNeeded(room);
+}
+
+async function handleChessMode(client, payload) {
+  const room = client.room;
+  if (!['red', 'black'].includes(client.role)) {
+    send(client.ws, { type: 'error', message: '观战不能切换象棋模式' });
+    return;
+  }
+  const mode = ['standard', 'ai', 'endgame-ai'].includes(payload.mode) ? payload.mode : 'standard';
+  if (mode === 'standard') {
+    room.chess = chess.createInitialState();
+    room.chessNotice = '已切换为双人对战';
+  } else if (mode === 'ai') {
+    const humanColor = client.role === 'black' ? 'black' : 'red';
+    room.chess = chess.createHumanVsAiState({ humanColor });
+    room.chessNotice = `已切换为人机对战，你执${roleLabelForServer(humanColor)}`;
+  } else {
+    room.chess = chess.createHumanVsAiState({ humanColor: 'red', endgameId: payload.endgameId });
+    room.chessNotice = `已进入残局练习：${room.chess.endgameName}`;
+  }
+  room.pendingUndo = null;
+  room.pendingReset = null;
+  broadcast(room);
+  await playChessAiIfNeeded(room);
 }
 
 function handleChessResign(client) {
@@ -282,6 +340,15 @@ function handleChat(client, payload) {
 function handleUndoRequest(client) {
   const room = client.room;
   if (!['red', 'black'].includes(client.role)) return;
+  if (chess.isAiMode(room.chess)) {
+    let next = chess.undoLastMove(room.chess);
+    if (next.turn !== next.humanColor && next.moveHistory.length > 0) next = chess.undoLastMove(next);
+    room.chess = next;
+    room.chessNotice = '已悔棋，轮到你重新走';
+    room.pendingUndo = null;
+    broadcast(room);
+    return;
+  }
   room.pendingUndo = { from: client.role, name: client.name };
   systemMessage(room, `${client.name} 申请悔棋`);
 }
@@ -300,9 +367,17 @@ function handleUndoResponse(client, payload) {
   broadcast(room);
 }
 
-function handleResetRequest(client) {
+async function handleResetRequest(client) {
   const room = client.room;
   if (!['red', 'black'].includes(client.role)) return;
+  if (chess.isAiMode(room.chess)) {
+    room.chess = chess.resetModeState(room.chess);
+    room.chessNotice = room.chess.mode === 'endgame-ai' ? `已重开残局：${room.chess.endgameName}` : '已重开人机对战';
+    room.pendingReset = null;
+    broadcast(room);
+    await playChessAiIfNeeded(room);
+    return;
+  }
   room.pendingReset = { from: client.role, name: client.name };
   systemMessage(room, `${client.name} 申请重置棋局`);
 }
@@ -561,6 +636,7 @@ async function handleMessage(ws, raw) {
 
   const handlers = {
     chat: () => handleChat(client, payload),
+    chessMode: () => handleChessMode(client, payload),
     chessMove: () => handleMove(client, payload),
     chessResign: () => handleChessResign(client),
     chessEngineAdvice: () => handleChessEngineAdvice(client, payload),

@@ -321,6 +321,25 @@ function renderChess() {
   const status = game.winner ? `${roleLabel(game.winner)}胜，将死` : game.status === 'check' ? `${roleLabel(game.turn)}被将军` : `轮到${roleLabel(game.turn)}`;
   const notice = model.state.chess.notice || '';
   const hint = model.chessHint || ChessHints.turnHint(game, model.you.role);
+  const endgames = ChessCore.listEndgames ? ChessCore.listEndgames() : [];
+  const activeMode = game.mode || 'standard';
+  const modeHelper = activeMode === 'ai'
+    ? `人机对战：你执${roleLabel(game.humanColor)}，AI执${roleLabel(game.aiColor)}`
+    : activeMode === 'endgame-ai'
+      ? `残局练习：${escapeHtml(game.endgameName || '')}，你执红`
+      : '双人对战：两名玩家轮流走棋';
+  const modeControls = `
+        <div class="mb-3 rounded-md border border-stone-200 bg-white/70 p-3">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <button data-chess-mode="standard" class="rounded-md px-3 py-2 text-sm font-bold ${activeMode === 'standard' ? 'bg-stone-900 text-white' : 'border border-stone-300 bg-white'}">双人对战</button>
+            <button data-chess-mode="ai" class="rounded-md px-3 py-2 text-sm font-bold ${activeMode === 'ai' ? 'bg-stone-900 text-white' : 'border border-stone-300 bg-white'}">人机对战</button>
+            <select id="endgameSelect" class="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-bold">
+              ${endgames.map((item) => `<option value="${escapeHtml(item.id)}" ${game.endgameId === item.id ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}
+            </select>
+            <button data-chess-mode="endgame-ai" class="rounded-md px-3 py-2 text-sm font-bold ${activeMode === 'endgame-ai' ? 'bg-stone-900 text-white' : 'border border-stone-300 bg-white'}">残局练习</button>
+          </div>
+          <p class="text-xs font-semibold text-stone-600">${modeHelper}</p>
+        </div>`;
   const engineControls = model.you.isAdmin ? `
           <select id="adviceLevel" class="rounded-md border border-amber-300 bg-white px-2 py-2 text-sm font-bold text-stone-900">
             ${adviceLevelOption('amateur', '业余高手')}
@@ -344,6 +363,7 @@ function renderChess() {
         </div>
       </div>
       ${notice ? `<div class="chess-notice mb-3" role="status">${escapeHtml(notice)}</div>` : ''}
+      ${modeControls}
       ${renderPending()}
       <div class="flex justify-center">${renderBoard(game)}</div>
       <div class="chess-hint mt-3" role="status">${escapeHtml(hint)}</div>
@@ -449,6 +469,12 @@ function bindChess() {
       render();
     });
   }
+  document.querySelectorAll('[data-chess-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const endgameId = document.querySelector('#endgameSelect')?.value;
+      send({ type: 'chessMode', mode: button.dataset.chessMode, endgameId });
+    });
+  });
   const adviceButton = document.querySelector('[data-action="advice"]');
   if (adviceButton) adviceButton.addEventListener('click', showChessAdvice);
   document.querySelector('[data-action="voice"]').addEventListener('click', enableVoice);

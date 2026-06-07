@@ -144,3 +144,55 @@ test('move notice includes the player name and moved piece', () => {
   assert.equal(result.ok, true);
   assert.equal(chess.moveNotice('阿强', result.state), '最近一步：阿强走了红方兵从1路7线走到1路6线，轮到黑方');
 });
+
+test('lists at least five playable endgame presets', () => {
+  const endgames = chess.listEndgames();
+
+  assert.ok(endgames.length >= 5);
+  assert.ok(endgames.every((item) => item.id && item.name));
+});
+
+test('creates an endgame state with mode metadata and legal kings', () => {
+  const preset = chess.listEndgames()[0];
+  const state = chess.createEndgameState(preset.id);
+
+  assert.equal(state.mode, 'endgame-ai');
+  assert.equal(state.endgameId, preset.id);
+  assert.equal(state.endgameName, preset.name);
+  assert.equal(state.turn, 'red');
+  assert.equal(chess.isInCheck(state, 'red'), false);
+  assert.ok(state.board.flat().some((piece) => piece?.color === 'red' && piece.type !== 'king'));
+  assert.ok(state.board.flat().some((piece) => piece?.color === 'black' && piece.type === 'king'));
+});
+
+test('creates a human-vs-ai chess state and preserves metadata after moves', () => {
+  const state = chess.createHumanVsAiState({ humanColor: 'red' });
+  const result = chess.movePiece(state, { x: 0, y: 6 }, { x: 0, y: 5 });
+
+  assert.equal(state.mode, 'ai');
+  assert.equal(state.humanColor, 'red');
+  assert.equal(state.aiColor, 'black');
+  assert.equal(result.ok, true);
+  assert.equal(result.state.mode, 'ai');
+  assert.equal(result.state.humanColor, 'red');
+  assert.equal(result.state.aiColor, 'black');
+});
+
+test('local AI recommendation is a legal move in endgame mode', () => {
+  const state = chess.createEndgameState('rook-cannon-attack');
+  const advice = chess.recommendExpertMove(state, state.turn, { level: 'amateur', movetime: 200 });
+  const result = chess.movePiece(state, advice.from, advice.to);
+
+  assert.equal(result.ok, true);
+});
+
+test('detects AI modes and resets to the current endgame preset', () => {
+  const state = chess.createEndgameState('horse-cannon-mate');
+  const moved = chess.movePiece(state, { x: 3, y: 2 }, { x: 5, y: 1 }).state;
+  const reset = chess.resetModeState(moved);
+
+  assert.equal(chess.isAiMode(state), true);
+  assert.equal(reset.mode, 'endgame-ai');
+  assert.equal(reset.endgameId, 'horse-cannon-mate');
+  assert.equal(reset.moveHistory.length, 0);
+});
