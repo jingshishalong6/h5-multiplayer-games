@@ -169,6 +169,15 @@ function playChessSound(kind) {
   try {
     unlockSound();
     if (!audioContext || !model.soundUnlocked) return;
+    if (kind === 'select') {
+      playTone({ type: 'sine', start: 0, duration: 0.045, from: 560, to: 720, volume: 0.08 });
+      return;
+    }
+    if (kind === 'drop') {
+      playTone({ type: 'triangle', start: 0, duration: 0.055, from: 420, to: 180, volume: 0.14 });
+      playTone({ type: 'sine', start: 0.035, duration: 0.045, from: 240, to: 170, volume: 0.1 });
+      return;
+    }
     if (kind === 'checkmate') {
       playTone({ type: 'square', start: 0, duration: 0.11, from: 180, to: 70, volume: 0.25 });
       playTone({ type: 'sawtooth', start: 0.1, duration: 0.22, from: 110, to: 46, volume: 0.18 });
@@ -193,10 +202,35 @@ function playChessSound(kind) {
 function maybePlayChessMoveSound(chessState, notice = '') {
   const event = AudioEvents.chessSoundEvent(model.lastChessMoveCount, chessState);
   if (model.joined && event) {
+    if (event === 'capture') vibrate([22, 20, 22]);
+    if (event === 'bigCapture' || event === 'check' || event === 'checkmate') vibrate([35, 25, 45]);
     playChessSound(event);
     playChessAnnouncement(AudioEvents.chessVoiceText(event, notice));
   }
   model.lastChessMoveCount = chessState?.moveHistory?.length || 0;
+}
+
+function vibrate(pattern) {
+  try {
+    if ('vibrate' in navigator) navigator.vibrate(pattern);
+  } catch {}
+}
+
+function playChessAnnouncementLegacy(text) {
+  if (!text || !('speechSynthesis' in window)) return;
+  try {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 0.88;
+    utterance.pitch = 1.08;
+    utterance.volume = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find((item) => /female|xiaoxiao|huihui|tingting|hanhan|yaoyao|女|普通话|zh/i.test(`${item.name} ${item.lang}`) && /zh|cn|mandarin|普通话/i.test(`${item.name} ${item.lang}`))
+      || voices.find((item) => /zh|cn|mandarin|普通话/i.test(`${item.name} ${item.lang}`));
+    if (voice) utterance.voice = voice;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  } catch {}
 }
 
 function playChessAnnouncement(text) {
@@ -204,12 +238,11 @@ function playChessAnnouncement(text) {
   try {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
-    utterance.rate = 0.95;
-    utterance.pitch = 1.18;
+    utterance.rate = 0.88;
+    utterance.pitch = 1.08;
     utterance.volume = 1;
     const voices = window.speechSynthesis.getVoices();
-    const voice = voices.find((item) => /female|xiaoxiao|huihui|tingting|hanhan|yaoyao|女|普通话|zh/i.test(`${item.name} ${item.lang}`) && /zh|cn|mandarin|普通话/i.test(`${item.name} ${item.lang}`))
-      || voices.find((item) => /zh|cn|mandarin|普通话/i.test(`${item.name} ${item.lang}`));
+    const voice = AudioEvents.selectChineseVoice ? AudioEvents.selectChineseVoice(voices) : voices.find((item) => /zh|cn|mandarin|普通话/i.test(`${item.name} ${item.lang}`));
     if (voice) utterance.voice = voice;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
@@ -393,23 +426,25 @@ function renderBoard(game) {
   for (let i = 0; i < 10; i += 1) lines.push(`<span class="board-line-h" style="top:${(i / 9) * 100}%"></span>`);
   for (let i = 0; i < 9; i += 1) lines.push(`<span class="board-line-v" style="left:${(i / 8) * 100}%"></span>`);
   const pieces = [];
+  const lastMove = game.moveHistory?.[game.moveHistory.length - 1];
   game.board.forEach((row, y) => row.forEach((piece, x) => {
     if (!piece) return;
     const view = BoardView.toView({ x, y }, viewRole);
     const selected = model.selected && model.selected.x === x && model.selected.y === y;
-    pieces.push(`<button class="piece ${piece.color} ${selected ? 'selected' : ''}" draggable="true" data-x="${x}" data-y="${y}" style="left:${posX(view.x)}%;top:${posY(view.y)}%">${pieceNames[piece.color][piece.type]}</button>`);
+    const landed = lastMove && lastMove.to.x === x && lastMove.to.y === y;
+    pieces.push(`<button class="piece ${piece.color} ${selected ? 'selected' : ''} ${landed ? 'landed' : ''}" draggable="true" data-x="${x}" data-y="${y}" style="left:${posX(view.x)}%;top:${posY(view.y)}%">${pieceNames[piece.color][piece.type]}</button>`);
   }));
   const dots = model.legalMoves.map((pos) => {
     const view = BoardView.toView(pos, viewRole);
     return `<button class="dot" data-to-x="${pos.x}" data-to-y="${pos.y}" style="left:${posX(view.x)}%;top:${posY(view.y)}%"></button>`;
   });
   const adviceMarkers = [];
-  const lastMove = game.moveHistory?.[game.moveHistory.length - 1];
   if (lastMove) {
     const from = BoardView.toView(lastMove.from, viewRole);
     const to = BoardView.toView(lastMove.to, viewRole);
     adviceMarkers.push(`<span class="last-move-marker last-from" style="left:${posX(from.x)}%;top:${posY(from.y)}%"></span>`);
     adviceMarkers.push(`<span class="last-move-marker last-to" style="left:${posX(to.x)}%;top:${posY(to.y)}%"></span>`);
+    if (lastMove.captured) adviceMarkers.push(`<span class="capture-burst" style="left:${posX(to.x)}%;top:${posY(to.y)}%"></span>`);
   }
   if (model.chessAdvice) {
     const from = BoardView.toView(model.chessAdvice.from, viewRole);
@@ -418,7 +453,7 @@ function renderBoard(game) {
     adviceMarkers.push(`<span class="advice-marker advice-to" style="left:${posX(to.x)}%;top:${posY(to.y)}%"></span>`);
   }
   return `
-    <div id="board" class="board-wrap">
+    <div id="board" class="board-wrap ${lastMove?.captured ? 'capture-shake' : ''} ${game.status === 'check' ? 'check-flash' : ''}">
       <div class="board-lines">${lines.join('')}</div>
       <div class="river"><span>楚河</span><span>汉界</span></div>
       ${dots.join('')}
@@ -544,6 +579,8 @@ function selectPiece(x, y) {
     return;
   }
   model.selected = { x, y };
+  vibrate(10);
+  playChessSound('select');
   model.legalMoves = ChessCore.getLegalMoves(game, model.selected);
   model.chessHint = ChessHints.selectionHint(model.legalMoves.length);
   render();
@@ -551,6 +588,8 @@ function selectPiece(x, y) {
 
 function sendMove(to) {
   if (!model.selected) return;
+  vibrate(18);
+  playChessSound('drop');
   send({ type: 'chessMove', from: model.selected, to });
 }
 

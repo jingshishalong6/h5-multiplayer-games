@@ -67,20 +67,33 @@ test('chess sound event ignores already-seen moves', () => {
   };
 
   assert.equal(audioEvents.chessSoundEvent(1, state), null);
-}
-);
+});
 
-test('chess voice text announces every normal move notice', () => {
+test('chess voice text keeps normal move announcements short', () => {
   assert.equal(
     audioEvents.chessVoiceText('move', '最近一步：阿强走了红方兵从1路7线走到1路6线，轮到黑方'),
-    '阿强走了红方兵从1路7线走到1路6线'
+    '阿强，红方兵'
+  );
+  assert.equal(
+    audioEvents.chessVoiceText('move', '最近一步：AI走了黑方炮从2路3线走到2路10线，吃掉红方马，轮到红方'),
+    'AI，黑方炮'
   );
 });
 
-test('chess voice text uses special phrases for tactical events', () => {
-  assert.equal(audioEvents.chessVoiceText('capture', '最近一步：阿强走了红方兵，吃掉黑方卒'), '吃');
-  assert.equal(audioEvents.chessVoiceText('bigCapture', '最近一步：阿强走了红方车，吃掉黑方马'), '卧槽，吃');
+test('chess voice text uses short tactical phrases', () => {
+  assert.equal(audioEvents.chessVoiceText('capture', '最近一步：阿强走了红方兵，吃掉黑方卒'), '吃子');
+  assert.equal(audioEvents.chessVoiceText('bigCapture', '最近一步：阿强走了红方车，吃掉黑方马'), '漂亮，吃大子');
   assert.equal(audioEvents.chessVoiceText('check', '最近一步：阿强走了红方车，黑方被将军'), '将军');
-  assert.equal(audioEvents.chessVoiceText('checkmate', '红方胜，将死'), '死棋');
+  assert.equal(audioEvents.chessVoiceText('checkmate', '红方胜，将死'), '将死');
   assert.equal(audioEvents.chessVoiceText('resign', ''), '认输');
+});
+
+test('selects the softest available Chinese female voice', () => {
+  const voices = [
+    { name: 'Microsoft Yunxi Online', lang: 'zh-CN' },
+    { name: 'Microsoft Xiaoxiao Online Natural', lang: 'zh-CN' },
+    { name: 'Google US English', lang: 'en-US' }
+  ];
+
+  assert.equal(audioEvents.selectChineseVoice(voices).name, 'Microsoft Xiaoxiao Online Natural');
 });
